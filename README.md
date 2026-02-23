@@ -65,25 +65,149 @@ Clash-Royale-Pod/
 
 ## Git Workflow
 
-**Never push directly to `main`.** Use feature branches and pull requests.
+We use the **Fork + Pull Request** workflow. No one pushes directly to the main repo — all changes go through PRs that are reviewed and merged by the maintainer (@max).
+
+### First-time setup (do this once)
+
+1. **Fork** the repo — click the **Fork** button on GitHub to create a copy under your own account.
+2. **Clone your fork** (not the main repo):
+   ```bash
+   git clone https://github.com/<your-username>/Clash-Royale-Pod.git
+   cd Clash-Royale-Pod
+   ```
+3. **Add the main repo as a remote** so you can pull updates:
+   ```bash
+   git remote add upstream https://github.com/<main-repo-owner>/Clash-Royale-Pod.git
+   ```
+4. Open in VS Code and reopen in the dev container (see [Quick Start](#quick-start)).
+
+### Already cloned the main repo?
+
+If you cloned the main repo before creating your fork, you don't need to start over. Just fork on GitHub, then swap your remotes:
 
 ```bash
-# Create a branch for your work
-git checkout -b data/add-annotation-script
+# Rename origin (currently the main repo) to upstream
+git remote rename origin upstream
 
-# Make changes, then commit
-git add <files>
-git commit -m "data: add annotation script for tower labels"
+# Add your fork as origin
+git remote add origin https://github.com/<your-username>/Clash-Royale-Pod.git
 
-# Push and open a PR
-git push -u origin data/add-annotation-script
+# Verify — origin should be your fork, upstream should be the main repo
+git remote -v
 ```
 
-Branch prefixes by sub-team:
+### The workflow for every task
+
+1. **Sync your fork** with the latest main before starting new work:
+   ```bash
+   git checkout main
+   git pull upstream main
+   git push origin main
+   ```
+2. **Create a branch** for your specific task:
+   ```bash
+   git checkout -b data/add-annotation-script
+   ```
+3. **Do your work and commit** with descriptive messages:
+   ```bash
+   git add <files>
+   git commit -m "data: add annotation script for tower labels"
+   ```
+4. **Push to your fork:**
+   ```bash
+   git push -u origin data/add-annotation-script
+   ```
+5. **Open a Pull Request** on GitHub from your fork's branch to the main repo's `main` branch.
+6. **Review & merge** — automated checks run, the maintainer reviews the code, and once approved it gets merged.
+
+### Updating an open PR
+
+When the maintainer reviews your PR and requests changes, you don't need to open a new PR. Just push more commits to the same branch — the PR updates automatically:
+
+```bash
+# You're still on your branch
+git checkout data/add-annotation-script
+
+# Make the requested fixes
+git add <files>
+git commit -m "data: fix edge case in annotation parser"
+
+# Push to the same branch — the PR updates automatically
+git push origin data/add-annotation-script
+```
+
+### Branch naming
+
+Use a prefix matching your sub-team:
 - `data/*` — Data & Detection
 - `tracking/*` — Tracking & Feature Engineering
 - `modeling/*` — Modeling & Visualization
 - `docs/*` — Documentation
+
+### Keep branches short-lived
+
+A branch should be created for a specific task, worked on for a few days, PR'd, merged, and then deleted. Don't let branches sit for weeks — the longer a branch lives, the more `main` changes underneath it, and the more likely you are to hit merge conflicts. Finish the task, open the PR, get it merged, move on.
+
+### Handling merge conflicts
+
+Conflicts happen when two people edit the same lines in the same file. If your PR shows a conflict:
+
+```bash
+# Update your local main from the main repo
+git checkout main
+git pull upstream main
+
+# Merge main into your branch
+git checkout data/my-branch
+git merge main
+```
+
+Git will mark conflicts in the file. Open it, pick the correct version, remove the `<<<<<<<` / `=======` / `>>>>>>>` markers, then:
+
+```bash
+git add <conflicted-file>
+git commit -m "data: resolve merge conflict"
+git push
+```
+
+**To minimize conflicts:** sync your fork often, keep branches short-lived, and try to split work by file when possible (if you own `annotate.py` and your teammate owns `train.py`, you'll almost never conflict).
+
+## Project Management
+
+### Branch protection
+
+The `main` branch is protected. No one can push to it directly — all changes must go through a Pull Request and be approved by the maintainer.
+
+### Issue tracker
+
+Use GitHub Issues to report bugs, propose features, and organize tasks. Reference issues in your commits and PRs (e.g., `fixes #12`).
+
+### Maintainer
+
+@max holds merge privileges and reviews all PRs. If your PR is ready for review, request a review from @max on GitHub.
+
+## Managing Dependencies Across the Team
+
+Since we use **uv + `pyproject.toml`**, adding packages on feature branches merges cleanly:
+
+1. **Add a package** on your branch: `uv add <package>` — this updates `pyproject.toml` and `uv.lock`.
+2. **Include both files** in your PR commit.
+3. **On merge**, Git auto-merges `pyproject.toml` as long as different people edited different lines. If there's a conflict in `uv.lock`, resolve `pyproject.toml` first, then run `uv lock` to regenerate the lockfile.
+
+### After pulling main with new dependencies
+
+```bash
+uv sync
+```
+
+This installs any newly added packages in your existing container. **No container rebuild needed.**
+
+### When a container rebuild IS needed
+
+Rebuild your container (VS Code: `Dev Containers: Rebuild Container`) if a PR changed:
+- `Dockerfile` (e.g., new system package like a C library)
+- `devcontainer.json` (features or settings)
+- `docker-compose.yml`
 
 ## Sub-Teams
 
