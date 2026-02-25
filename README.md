@@ -20,22 +20,46 @@ A computer vision and statistical modeling pipeline that analyzes Clash Royale m
    ```bash
    code .
    ```
-3. When prompted, click **"Reopen in Container"** (or run `Dev Containers: Reopen in Container` from the command palette)
-4. **Windows users:** If the container build fails with `\r': command not found` errors, your git converted files to Windows line endings. Fix it by running this **outside** the container before reopening:
+3. When prompted, click **"Reopen in Container"** (or press ctrl+shift+p and run `Dev Containers: Reopen in Container` from the command palette)
+
+*Windows users*: If the container build fails with `\r': command not found` errors, your git converted files to Windows line endings. Fix it by running this **outside** the container before reopening:
    ```bash
    git pull
    git rm --cached -r .
    git reset --hard
    ```
-5. Wait for the container to build (~3-5 min the first time)
+4. Wait for the container to build (~3-5 min the first time)
 5. Verify everything works:
    ```bash
    uv run python -c "import torch; import cv2; import ultralytics; print('ready')"
    ```
+   **AND**
+   ```bash
+   bash .devcontainer/test_tools.sh
+   ```
 
 That's it. Python, PyTorch, YOLO, OpenCV, FFmpeg, Tesseract, and all dependencies are pre-installed.
 
-## Project Structure
+### Make sure your virtual environment is activated
+
+When you open a terminal in VS Code, the Python extension should automatically activate the `.venv`. You can tell by looking at your terminal prompt — it should start with `(workspace)` (Be patient and wait a couple of seconds before running the source command 😊)
+
+**BAD**
+
+![no env activated](README_IMAGES/image.png)
+
+**GOOD**
+
+![venv activated](README_IMAGES/image-1.png)
+
+If you don't see `(workspace)` in your prompt, activate it manually:
+```bash
+source .venv/bin/activate
+```
+
+**Why this matters:** Without the venv activated, `python` uses the system Python (3.12) which doesn't have your project's packages installed. With it activated, `python` uses the project's Python (3.11) with all dependencies available.
+
+## Project Structure (Ignore for now)
 
 ```
 Clash-Royale-Pod/
