@@ -5,7 +5,8 @@
   "workspaceFolder": "/workspace",
   "remoteUser": "vscode",
   "features": {
-    "ghcr.io/devcontainers-extra/features/uv:1": {}
+    "ghcr.io/devcontainers-extra/features/uv:1": {},
+    "ghcr.io/devcontainers/features/node:1": {}
   },
   "customizations": {
     "vscode": {
@@ -24,6 +25,6 @@
     "UV_INIT_BARE": "true",
     "INSTALL_IPYKERNEL": "true"
   },
-  "postCreateCommand": "make post-create",
+  "postCreateCommand": "make post-create && curl -fsSL https://claude.ai/install.sh | bash && npm install -g @google/gemini-cli @openai/codex",
   "mounts": []
 }

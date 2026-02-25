@@ -21,7 +21,13 @@ A computer vision and statistical modeling pipeline that analyzes Clash Royale m
    code .
    ```
 3. When prompted, click **"Reopen in Container"** (or run `Dev Containers: Reopen in Container` from the command palette)
-4. Wait for the container to build (~3-5 min the first time)
+4. **Windows users:** If the container build fails with `\r': command not found` errors, your git converted files to Windows line endings. Fix it by running this **outside** the container before reopening:
+   ```bash
+   git pull
+   git rm --cached -r .
+   git reset --hard
+   ```
+5. Wait for the container to build (~3-5 min the first time)
 5. Verify everything works:
    ```bash
    uv run python -c "import torch; import cv2; import ultralytics; print('ready')"
