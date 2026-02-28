@@ -50,4 +50,9 @@ jobs:
         run: uv sync --frozen
 
       - name: mypy
-        run: uv run mypy .
+        run: |
+          if find . -name '*.py' -not -path './.venv/*' | grep -q .; then
+            uv run mypy .
+          else
+            echo "No .py files found, skipping mypy"
+          fi
