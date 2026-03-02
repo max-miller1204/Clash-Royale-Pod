@@ -95,44 +95,41 @@ Clash-Royale-Pod/
 
 ## Git Workflow
 
-We use the **Fork + Pull Request** workflow. No one pushes directly to the main repo — all changes go through PRs that are reviewed and merged by the maintainer (@max).
+We use the **Shared Repo + Pull Request** workflow. Everyone works on the same repo — no forks. No one pushes directly to `main` — all changes go through PRs that are reviewed and merged by the maintainer (@max).
 
 ### First-time setup (do this once)
 
-1. **Fork** the repo — click the **Fork** button on GitHub to create a copy under your own account.
-2. **Clone your fork** (not the main repo):
+1. **Get added as a collaborator** — ask @max to add you to the repo on GitHub (Settings → Collaborators).
+2. **Clone the repo:**
    ```bash
-   git clone https://github.com/<your-username>/Clash-Royale-Pod.git
+   git clone https://github.com/<repo-owner>/Clash-Royale-Pod.git
    cd Clash-Royale-Pod
    ```
-3. **Add the main repo as a remote** so you can pull updates:
-   ```bash
-   git remote add upstream https://github.com/<main-repo-owner>/Clash-Royale-Pod.git
-   ```
-4. Open in VS Code and reopen in the dev container (see [Quick Start](#quick-start)).
+3. Open in VS Code and reopen in the dev container (see [Quick Start](#quick-start)).
 
-### Already cloned the main repo?
+That's it. No forks, no upstream remotes. Everyone pushes to the same repo.
 
-If you cloned the main repo before creating your fork, you don't need to start over. Just fork on GitHub, then swap your remotes:
+### Already have a fork?
+
+If you previously forked the repo, you can switch to the shared model. Delete your fork on GitHub, then update your local clone to point at the main repo:
 
 ```bash
-# Rename origin (currently the main repo) to upstream
-git remote rename origin upstream
+# Check your current remote
+git remote -v
 
-# Add your fork as origin
-git remote add origin https://github.com/<your-username>/Clash-Royale-Pod.git
+# If origin points to your fork, update it to the main repo
+git remote set-url origin https://github.com/<repo-owner>/Clash-Royale-Pod.git
 
-# Verify — origin should be your fork, upstream should be the main repo
+# Verify
 git remote -v
 ```
 
 ### The workflow for every task
 
-1. **Sync your fork** with the latest main before starting new work:
+1. **Pull the latest main** before starting new work:
    ```bash
    git checkout main
-   git pull upstream main
-   git push origin main
+   git pull
    ```
 2. **Create a branch** for your specific task:
    ```bash
@@ -143,12 +140,73 @@ git remote -v
    git add <files>
    git commit -m "data: add annotation script for tower labels"
    ```
-4. **Push to your fork:**
+4. **Push your branch:**
    ```bash
    git push -u origin data/add-annotation-script
    ```
-5. **Open a Pull Request** on GitHub from your fork's branch to the main repo's `main` branch.
+5. **Open a Pull Request** on GitHub from your branch to `main`.
 6. **Review & merge** — automated checks run, the maintainer reviews the code, and once approved it gets merged.
+
+### Collaborating within a subgroup (multi-person features)
+
+When two or more people in the same subgroup need to work on the same feature, use a shared feature branch with sub-branches:
+
+1. **Person A creates the shared feature branch:**
+   ```bash
+   git checkout main
+   git pull
+   git checkout -b tracking/bytetrack
+   git push -u origin tracking/bytetrack
+   ```
+
+2. **Person B pulls the shared branch:**
+   ```bash
+   git fetch
+   git checkout tracking/bytetrack
+   ```
+
+3. **Each person creates a sub-branch off the shared branch:**
+   ```bash
+   # Person A
+   git checkout tracking/bytetrack
+   git checkout -b tracking/bytetrack-detection
+
+   # Person B
+   git checkout tracking/bytetrack
+   git checkout -b tracking/bytetrack-scoring
+   ```
+
+4. **Each person pushes their sub-branch and PRs into the shared branch (not `main`):**
+   ```bash
+   # Person A
+   git checkout tracking/bytetrack-detection
+   git push -u origin tracking/bytetrack-detection
+   ```
+   Then on GitHub: open a PR and **change the base branch** from `main` to `tracking/bytetrack` (click the base dropdown).
+
+   Person B does the same:
+   ```bash
+   git checkout tracking/bytetrack-scoring
+   git push -u origin tracking/bytetrack-scoring
+   ```
+   Same thing on GitHub: PR into `tracking/bytetrack`.
+
+5. **After both sub-PRs are reviewed and merged**, PR the shared branch into `main`:
+   ```bash
+   git checkout tracking/bytetrack
+   git pull
+   ```
+   Then on GitHub: open a PR from `tracking/bytetrack` → `main`.
+
+6. **Clean up after the PR is merged:**
+   ```bash
+   git checkout main
+   git pull
+   git branch -d tracking/bytetrack
+   git branch -d tracking/bytetrack-detection
+   git branch -d tracking/bytetrack-scoring
+   ```
+   GitHub will also show a "Delete branch" button on each merged PR to clean up the remote branches.
 
 ### Updating an open PR
 
@@ -163,7 +221,7 @@ git add <files>
 git commit -m "data: fix edge case in annotation parser"
 
 # Push to the same branch — the PR updates automatically
-git push origin data/add-annotation-script
+git push
 ```
 
 ### Branch naming
@@ -183,9 +241,9 @@ A branch should be created for a specific task, worked on for a few days, PR'd, 
 Conflicts happen when two people edit the same lines in the same file. If your PR shows a conflict:
 
 ```bash
-# Update your local main from the main repo
+# Update your local main
 git checkout main
-git pull upstream main
+git pull
 
 # Merge main into your branch
 git checkout data/my-branch
@@ -200,7 +258,7 @@ git commit -m "data: resolve merge conflict"
 git push
 ```
 
-**To minimize conflicts:** sync your fork often, keep branches short-lived, and try to split work by file when possible (if you own `annotate.py` and your teammate owns `train.py`, you'll almost never conflict).
+**To minimize conflicts:** pull often, keep branches short-lived, and try to split work by file when possible (if you own `annotate.py` and your teammate owns `train.py`, you'll almost never conflict).
 
 ## Project Management
 

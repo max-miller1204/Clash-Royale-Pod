@@ -31,8 +31,10 @@ Three-stage pipeline with defined interface contracts between stages:
 
 ## Git Workflow
 
-- Fork + Pull Request model. Never push directly to `main`.
-- Branch prefixes: `data/*`, `tracking/*`, `modeling/*`, `docs/*`
+- Shared repo + Pull Request model. Never push directly to `main`.
+- `main` is branch-protected: all changes require a PR with at least one review.
+- Branch prefixes map to subgroups: `data/*`, `tracking/*`, `modeling/*`, `docs/*`
+- For multi-person features within a subgroup, branch off the shared feature branch (e.g. `tracking/bytetrack-tuning` off `tracking/bytetrack`) and PR back into it before merging to `main`.
 - Commit message prefixes: `data:`, `tracking:`, `model:`, `viz:`, `docs:`
 - `data/` and `output/` directories are gitignored (large files stay local).
 
