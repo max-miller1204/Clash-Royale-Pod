@@ -28,5 +28,6 @@
     "INSTALL_IPYKERNEL": "true"
   },
   "postCreateCommand": "make post-create && curl -fsSL https://claude.ai/install.sh | bash && npm install -g @google/gemini-cli @openai/codex",
+  "postStartCommand": "grep -qxF 'source /workspace/.venv/bin/activate' ~/.bashrc || echo 'source /workspace/.venv/bin/activate' >> ~/.bashrc",
   "mounts": []
 }
