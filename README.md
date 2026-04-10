@@ -6,78 +6,67 @@ A computer vision and statistical modeling pipeline that analyzes Clash Royale m
 
 ### Prerequisites
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-- [VS Code](https://code.visualstudio.com/) with the [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) extension
+- [Nix](https://nixos.org/download) with flakes enabled (`experimental-features = nix-command flakes` in `~/.config/nix/nix.conf`)
+- Optional: [direnv](https://direnv.net/) for auto-activation
 
 ### Setup
 
-1. Clone the repo
-   ```bash
-   git clone <repo-url>
-   cd Clash-Royale-Pod
-   ```
-2. Open in VS Code
-   ```bash
-   code .
-   ```
-3. When prompted, click **"Reopen in Container"** (or press ctrl+shift+p and run `Dev Containers: Reopen in Container` from the command palette)
-
-*Windows users*: If the container build fails with `\r': command not found` errors, your git converted files to Windows line endings. Fix it by running this **outside** the container before reopening:
-   ```bash
-   git pull
-   git rm --cached -r .
-   git reset --hard
-   ```
-4. Wait for the container to build (~3-5 min the first time)
-5. Verify everything works:
-   ```bash
-   uv run python -c "import torch; import cv2; import ultralytics; print('ready')"
-   ```
-   **AND**
-   ```bash
-   bash .devcontainer/test_tools.sh
-   ```
-
-That's it. Python, PyTorch, YOLO, OpenCV, FFmpeg, Tesseract, and all dependencies are pre-installed.
-
-### Make sure your virtual environment is activated
-
-When you open a terminal in VS Code, the Python extension should automatically activate the `.venv`. You can tell by looking at your terminal prompt — it should start with `(workspace)` (Be patient and wait a couple of seconds before running the source command 😊)
-
-**BAD**
-
-![no env activated](README_IMAGES/image.png)
-
-**GOOD**
-
-![venv activated](README_IMAGES/image-1.png)
-
-If you don't see `(workspace)` in your prompt, activate it manually:
 ```bash
-source .venv/bin/activate
+git clone <repo-url>
+cd Clash-Royale-Pod
+nix develop           # first enter takes a few minutes — system deps + uv sync
+uv run crpod --help
 ```
 
-**Why this matters:** Without the venv activated, `python` uses the system Python (3.12) which doesn't have your project's packages installed. With it activated, `python` uses the project's Python (3.11) with all dependencies available.
+If you use direnv, `direnv allow` once and the shell auto-activates on `cd`.
 
-## Project Structure (Ignore for now)
+The flake provides: Python 3.11, uv, ffmpeg, tesseract, ruff, plus the native libraries OpenCV/PyTorch need. Python packages (`torch`, `ultralytics`, `lightgbm`, …) are installed into `.venv` by `uv sync` — nixifying CUDA is not worth the pain.
+
+### Verify the environment
+
+```bash
+uv run python -c "import torch, cv2, ultralytics, lightgbm, pytesseract; print('ready')"
+uv run pytest
+```
+
+### Running the pipeline
+
+The HF TV-replay dataset ships structured card placements, so you can skip detection/tracking entirely for dataset replays:
+
+```bash
+# List available replays
+uv run crpod list-replays --arena arena_15
+
+# Analyze one replay → JSON + plots under output/analysis/
+uv run crpod analyze arena_15 <replay_id>
+
+# Train an EV model on 50 replays
+uv run crpod train --out output/models/ev.joblib --max-replays 50
+```
+
+For custom video ingest (raw mp4 → YOLO → ByteTrack → OCR → pipeline), see `src/crpod/pipeline.py::analyze_video`. That path is stubbed until the Data & Detection sub-team trains YOLO weights.
+
+## Project Structure
 
 ```
 Clash-Royale-Pod/
-├── .devcontainer/          # Docker + devcontainer config
-│   ├── Dockerfile
-│   ├── devcontainer.json
-│   ├── docker-compose.yml
-│   └── test_tools.sh
-├── .vscode/                # VS Code settings (auto-format, linting)
-├── data/                   # Match replays, frames, annotations (gitignored)
-├── output/                 # Pipeline outputs (gitignored)
-│   ├── frames/             # Extracted frames
-│   ├── annotations/        # COCO-format labels
-│   ├── models/             # Trained model weights
-│   └── events/             # Per-match event logs
-├── Makefile                # Dev commands (lint, format, sync, etc.)
-├── pyproject.toml          # Python dependencies (managed by uv)
-├── uv.lock                 # Locked dependency versions
+├── flake.nix               # Nix dev environment (replaces devcontainer)
+├── .envrc                  # direnv entrypoint (use flake)
+├── src/crpod/              # Pipeline package
+│   ├── dataset/            # HF replay loader + raw video iterator
+│   ├── detection/          # YOLO wrapper (custom-replay path)
+│   ├── tracking/           # ByteTrack wrapper (custom-replay path)
+│   ├── ocr/                # Tesseract HUD reader
+│   ├── features/           # Elixir ledger, interactions, placement zones
+│   ├── modeling/           # LightGBM EV model
+│   ├── visualization/      # Heatmaps, tempo plots, EV breakdowns
+│   ├── pipeline.py         # End-to-end orchestrator
+│   └── __main__.py         # `crpod` CLI
+├── tests/                  # pytest — pure-logic feature tests
+├── output/                 # Pipeline artifacts (gitignored)
+├── Makefile                # Dev shortcuts (sync, lint, format, test)
+├── pyproject.toml          # Python dependencies (uv)
+└── uv.lock                 # Locked dependency versions
 ├── pod_summary.md          # Project proposal
 └── workflow.md             # Team workflow and collaboration guide
 ```
@@ -289,16 +278,10 @@ After pulling the latest changes from main, check what files changed and follow 
 | What changed | What to do |
 | ------------ | ---------- |
 | `pyproject.toml` / `uv.lock` (new Python packages) | Run `uv sync` — no rebuild needed |
-| `Makefile` or `.devcontainer/test_tools.sh` | No action needed, changes apply automatically |
-| `Dockerfile`, `devcontainer.json`, or `docker-compose.yml` | **Rebuild the container** (see below) |
+| `flake.nix` / `flake.lock` (system tools or nixpkgs pin) | Re-enter the shell: `exit` then `nix develop` (or let direnv handle it) |
+| `Makefile` | No action needed |
 
-**To rebuild:** Open the VS Code command palette and run `Dev Containers: Rebuild Container`. This will rebuild the image and re-run the setup. You will need to re-authenticate the AI coding tools after a rebuild.
-
-If you're unsure what changed, you can always run `uv sync` (safe to run anytime) and check if a rebuild is needed:
-```bash
-git diff main@{1} --name-only | grep -E "Dockerfile|devcontainer.json|docker-compose.yml"
-```
-If that returns any files, rebuild. Otherwise `uv sync` is enough.
+`uv sync` is always safe to run.
 
 ## Sub-Teams
 
@@ -308,22 +291,9 @@ If that returns any files, rebuild. Otherwise `uv sync` is enough.
 | **Tracking & Feature Engineering** | ByteTrack (via supervision), Tesseract OCR, event log construction |
 | **Modeling & Visualization** | LightGBM, EV calculations, heatmaps, statistical analysis |
 
-## AI Coding Tools
-
-The container comes with three AI coding assistants pre-installed. After your first container build, authenticate each one by running the command in the terminal:
-
-| Tool | Command | Auth |
-| ---- | ------- | ---- |
-| [Claude Code](https://claude.ai) | `claude` | Log in with your Claude account |
-| [Gemini CLI](https://geminicli.com) | `gemini` | Log in with your Google account |
-| [Codex CLI](https://github.com/openai/codex) | `codex` | Log in with your ChatGPT account |
-
-You only need to authenticate once per container rebuild.
-
 ## Key Docs
 
-- **[pod_summary.md](pod_summary.md)** — Full project proposal, research question, algorithm design
-- **[workflow.md](workflow.md)** — Team structure, communication, interface contracts, weekly cadence
+- **[pod_summary.md](./pod_summary.md)** — Full project proposal, research question, algorithm design
 
 ## Tech Stack
 
