@@ -4,13 +4,14 @@ Remaining work to finish the Clash Royale Post-Game Analyzer, grouped by what un
 
 ## Immediate (you, today)
 
-- [ ] **Smoke test HF loader end-to-end.** Run `uv run crpod list-replays` against `chrisrca/clash-royale-tv-replays` to confirm arena naming — the dataset schema claimed 3 arena values but the card described 31, verify the real layout before the team relies on it. Then run `uv run crpod analyze` on one replay and inspect `summary.json`, `placements.png`, `tempo.png`.
+- [ ] **Smoke test HF loader listing.** Run `uv run crpod list-replays` against `chrisrca/clash-royale-tv-replays` to confirm arena naming — the dataset schema claimed 3 arena values but the card described 31, verify the real layout before the team relies on it.
+- [ ] **Smoke test analysis end-to-end (blocked on YOLO weights).** The HF dataset contains raw frame images (`frame_id`, `image`, `hash`), not pre-extracted card placements. Running `uv run crpod analyze arena_15 <replay_id> --weights <path>` requires trained YOLO weights to detect cards in each frame. Once weights land, inspect `summary.json`, `placements.png`, `tempo.png`.
 - [ ] **Update `.gitignore`** for the new layout: `output/`, `.venv/`, `__pycache__/`, `.mypy_cache/`, `.ruff_cache/`, `.pytest_cache/`, `result/` (nix build symlink). Check whether `.claude-flow/` and `.DS_Store` also need rules.
 - [ ] **Commit flake + src scaffold and open PR.** Stage `flake.nix`, `.envrc`, `src/`, `tests/`, `pyproject.toml`, `Makefile`, `README.md`, `docs/TODO.md`. Do **not** stage `.claude/`, `.claude-flow/`, `.mcp.json`, `.DS_Store`, `.venv/`. Single commit: `feat: nix flake + crpod pipeline scaffold`.
 
-## Data quality (unblocked on the HF path)
+## Data quality (blocked on YOLO weights for the HF path)
 
-- [ ] **Validate side inference heuristic.** The dataset doesn't label friendly vs enemy — `_infer_side` in `src/crpod/dataset/huggingface.py` splits on `y > RIVER_Y`. Inspect `preview.jpg` and placement distributions across a few replays to confirm which side is the recorder. Fix if wrong.
+- [ ] **Validate side inference heuristic.** The dataset doesn't label friendly vs enemy — `_infer_side` in `src/crpod/dataset/huggingface.py` splits on `y > RIVER_Y` using detection center coordinates. Once YOLO weights land, inspect placement distributions across a few replays to confirm which side is the recorder. Fix if wrong.
 - [ ] **Expand `CARD_COSTS` to all 159 cards.** `src/crpod/constants.py` covers ~40. Pull the full card → cost map from RoyaleAPI or the CR wiki. Unknown cards fall back to `default=3` which biases every EV calculation.
 - [ ] **Replace `elixir_trade` proxy with a real EV target.** `crpod train` currently uses elixir trade as the label — that's a starting proxy, not true EV. Add damage approximation (frame-to-frame placement proximity) or wire in a tower HP signal. See `pod_summary.md` Option B.
 
@@ -22,6 +23,7 @@ Remaining work to finish the Clash Royale Post-Game Analyzer, grouped by what un
 
 ## Integration (blocked on YOLO + OCR)
 
+- [x] **Wire HF replay path through YOLO.** The HF dataset contains raw frame images, not pre-extracted placements. `_parquet_to_replay` now decodes frames from parquet and runs `YoloDetector` to extract `CardPlay` events. `analyze` and `train` CLI subcommands require `--weights`. Blocked on trained weights landing.
 - [ ] **Wire `analyze_video` end-to-end.** In `src/crpod/pipeline.py`: `VideoFrameIterator → YoloDetector → Tracker → HudReader → CardPlay/HudState stream → analyze_replay`. Add a `crpod analyze-video PATH` CLI subcommand.
 
 ## Real-time mode (scope expansion past the 10-week timeline)
@@ -45,4 +47,4 @@ The offline architecture already supports this — the CV stages run ~30-50ms/fr
 
 ## Suggested order
 
-`Smoke test → .gitignore → commit PR` gets the scaffold landed before anyone else pulls. From there, the HF-dataset path (side inference → CARD_COSTS → EV target → blunder detection) is fully parallel with the YOLO/OCR sub-team work.
+`Smoke test listing → .gitignore → commit PR` gets the scaffold landed before anyone else pulls. **YOLO weights are now the critical-path blocker** — both the HF-dataset path and the custom-video path require them. Once the Data & Detection team delivers `yolo.pt`, the HF-dataset path (side inference → CARD_COSTS → EV target → blunder detection) unblocks. OCR tuning and `analyze_video` wiring are independent of HF analysis and can proceed in parallel once weights exist.

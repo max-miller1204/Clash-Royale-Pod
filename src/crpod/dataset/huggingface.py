@@ -1,11 +1,10 @@
 """Loader for chrisrca/clash-royale-tv-replays.
 
-The dataset ships per-replay parquet files with (card, x, y, frame, arena)
-rows — structured card placements already extracted. This bypasses YOLO for
-dataset replays; YOLO is only needed for custom video ingest.
+The dataset ships per-replay parquet files with raw frame images:
+    frame_id: int64, image: struct<bytes: binary, path: string>, hash: string
 
-Schema (per row): card: str, png_bytes: bytes, x: int16, y: int16,
-arena: str, replay: str, frame: int16.
+Card placements are NOT pre-extracted — YOLO detection must be run on the
+decoded frame images to produce CardPlay events.
 
 Side assignment heuristic: HF dataset captures TV-royale third-person view
 where both players are visible but side isn't labeled. We infer side from
@@ -19,7 +18,10 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 from crpod.constants import RIVER_Y, card_cost
+from crpod.detection.yolo import Detection, YoloDetector
 from crpod.types import CardPlay, Replay, Side
 
 DATASET_ID = "chrisrca/clash-royale-tv-replays"
@@ -31,16 +33,33 @@ def _infer_side(y: int) -> Side:
     return Side.FRIENDLY if y >= RIVER_Y else Side.ENEMY
 
 
+def _detection_to_card_play(det: Detection) -> CardPlay:
+    cx, cy = det.center
+    return CardPlay(
+        frame=det.frame,
+        card=det.cls,
+        x=int(cx),
+        y=int(cy),
+        side=_infer_side(int(cy)),
+        elixir_cost=card_cost(det.cls),
+    )
+
+
 @dataclass
 class HFReplayLoader:
     """Streams replays from the HF hub.
 
     Downloads are cached via huggingface_hub's default cache dir. Set
     `token` if the dataset becomes gated.
+
+    Requires `yolo_weights` pointing at a trained YOLO checkpoint to
+    extract card placements from the raw frame images.
     """
 
+    yolo_weights: Path | None = None
     cache_dir: Path | None = None
     token: str | None = None
+    yolo_conf: float = 0.25
 
     def list_replays(self, arena: str | None = None) -> list[tuple[str, str]]:
         """Return (arena, replay_id) pairs available in the dataset."""
@@ -61,6 +80,12 @@ class HFReplayLoader:
         return out
 
     def load(self, arena: str, replay_id: str) -> Replay:
+        if self.yolo_weights is None:
+            raise ValueError(
+                "YOLO weights are required to analyze HF replays. The dataset "
+                "contains raw frame images — card placements must be extracted "
+                "via YOLO detection. Pass --weights <path> to the CLI."
+            )
         from huggingface_hub import hf_hub_download
 
         path = hf_hub_download(
@@ -70,37 +95,38 @@ class HFReplayLoader:
             cache_dir=str(self.cache_dir) if self.cache_dir else None,
             token=self.token,
         )
-        return _parquet_to_replay(Path(path), arena=arena, replay_id=replay_id)
+        detector = YoloDetector(self.yolo_weights, conf=self.yolo_conf)
+        return _parquet_to_replay(
+            Path(path), arena=arena, replay_id=replay_id, detector=detector
+        )
 
     def stream(self, arena: str | None = None) -> Iterator[Replay]:
         for a, r in self.list_replays(arena=arena):
             yield self.load(a, r)
 
 
-def _parquet_to_replay(path: Path, arena: str, replay_id: str) -> Replay:
+def _decode_frames(path: Path) -> Iterator[tuple[int, np.ndarray]]:
+    """Read the parquet and yield (frame_id, BGR ndarray) pairs."""
+    import cv2
     import pyarrow.parquet as pq
 
-    table = pq.read_table(path, columns=["card", "x", "y", "frame"])
-    cards = table.column("card").to_pylist()
-    xs = table.column("x").to_pylist()
-    ys = table.column("y").to_pylist()
-    frames = table.column("frame").to_pylist()
+    table = pq.read_table(path, columns=["frame_id", "image"])
+    frame_ids = table.column("frame_id").to_pylist()
+    images = table.column("image").to_pylist()
 
-    plays: list[CardPlay] = []
-    for card, x, y, frame in zip(cards, xs, ys, frames, strict=True):
-        if card is None:
-            continue
-        plays.append(
-            CardPlay(
-                frame=int(frame),
-                card=str(card),
-                x=int(x),
-                y=int(y),
-                side=_infer_side(int(y)),
-                elixir_cost=card_cost(str(card)),
-            )
-        )
+    for frame_id, img in zip(frame_ids, images, strict=True):
+        raw = img["bytes"]
+        arr = np.frombuffer(raw, dtype=np.uint8)
+        bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if bgr is not None:
+            yield int(frame_id), bgr
 
+
+def _parquet_to_replay(
+    path: Path, arena: str, replay_id: str, detector: YoloDetector
+) -> Replay:
+    detections = detector.infer(_decode_frames(path))
+    plays = [_detection_to_card_play(d) for d in detections]
     total_frames = max((p.frame for p in plays), default=0)
     return Replay(
         replay_id=replay_id,
@@ -112,6 +138,8 @@ def _parquet_to_replay(path: Path, arena: str, replay_id: str) -> Replay:
     )
 
 
-def load_replay(arena: str, replay_id: str, **kwargs: object) -> Replay:
+def load_replay(
+    arena: str, replay_id: str, yolo_weights: Path, **kwargs: object
+) -> Replay:
     """Convenience wrapper."""
-    return HFReplayLoader(**kwargs).load(arena, replay_id)  # type: ignore[arg-type]
+    return HFReplayLoader(yolo_weights=yolo_weights, **kwargs).load(arena, replay_id)  # type: ignore[arg-type]

@@ -2,8 +2,8 @@
 
 Two ingest paths:
 
-1. `analyze_hf_replay` — structured (card, x, y, frame) rows from the HF
-   TV-replay dataset. Skips detection/tracking/OCR.
+1. `analyze_hf_replay` — raw frame images from the HF TV-replay dataset.
+   Runs YOLO detection on decoded frames to extract card placements.
 2. `analyze_video` — raw mp4. Runs YOLO → ByteTrack → HUD OCR to reconstruct
    the same CardPlay/HudState stream, then joins path 1 downstream.
 
@@ -51,9 +51,12 @@ def analyze_replay(replay: Replay, model: EvModel | None = None) -> AnalysisResu
 
 
 def analyze_hf_replay(
-    arena: str, replay_id: str, model: EvModel | None = None
+    arena: str,
+    replay_id: str,
+    yolo_weights: Path,
+    model: EvModel | None = None,
 ) -> AnalysisResult:
-    loader = HFReplayLoader()
+    loader = HFReplayLoader(yolo_weights=yolo_weights)
     replay = loader.load(arena, replay_id)
     return analyze_replay(replay, model=model)
 

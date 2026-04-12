@@ -19,7 +19,7 @@ from crpod.pipeline import analyze_hf_replay, analyze_replay
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
-    loader = HFReplayLoader()
+    loader = HFReplayLoader()  # no weights needed for listing
     for arena, replay_id in loader.list_replays(arena=args.arena):
         print(f"{arena}\t{replay_id}")
     return 0
@@ -27,7 +27,9 @@ def _cmd_list(args: argparse.Namespace) -> int:
 
 def _cmd_analyze(args: argparse.Namespace) -> int:
     model = EvModel.load(args.model) if args.model else None
-    result = analyze_hf_replay(args.arena, args.replay_id, model=model)
+    result = analyze_hf_replay(
+        args.arena, args.replay_id, yolo_weights=args.weights, model=model
+    )
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -53,7 +55,7 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
 
 
 def _cmd_train(args: argparse.Namespace) -> int:
-    loader = HFReplayLoader()
+    loader = HFReplayLoader(yolo_weights=args.weights)
     rows: list[dict] = []
     targets: list[float] = []
     available = loader.list_replays(arena=args.arena)[: args.max_replays]
@@ -85,11 +87,13 @@ def build_parser() -> argparse.ArgumentParser:
     ana = sub.add_parser("analyze", help="analyze one HF replay")
     ana.add_argument("arena")
     ana.add_argument("replay_id")
+    ana.add_argument("--weights", required=True, type=Path, help="path to trained YOLO weights")
     ana.add_argument("--out", default="output/analysis")
     ana.add_argument("--model", default=None, type=Path)
     ana.set_defaults(func=_cmd_analyze)
 
     tr = sub.add_parser("train", help="train EV model on HF replays")
+    tr.add_argument("--weights", required=True, type=Path, help="path to trained YOLO weights")
     tr.add_argument("--out", required=True, type=Path)
     tr.add_argument("--arena", default=None)
     tr.add_argument("--max-replays", type=int, default=50)

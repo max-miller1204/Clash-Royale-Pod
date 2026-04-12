@@ -6,10 +6,13 @@ A computer vision and statistical modeling pipeline that analyzes Clash Royale m
 
 ### Prerequisites
 
-- [Nix](https://nixos.org/download) with flakes enabled (`experimental-features = nix-command flakes` in `~/.config/nix/nix.conf`)
-- Optional: [direnv](https://direnv.net/) for auto-activation
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) (Python package manager)
+- System dependencies: `ffmpeg`, `tesseract`, and OpenCV native libs (see setup options below)
 
-### Setup
+### Option A: Nix (recommended)
+
+If you have [Nix](https://nixos.org/download) with flakes enabled (`experimental-features = nix-command flakes` in `~/.config/nix/nix.conf`):
 
 ```bash
 git clone <repo-url>
@@ -20,7 +23,35 @@ uv run crpod --help
 
 If you use direnv, `direnv allow` once and the shell auto-activates on `cd`.
 
-The flake provides: Python 3.11, uv, ffmpeg, tesseract, ruff, plus the native libraries OpenCV/PyTorch need. Python packages (`torch`, `ultralytics`, `lightgbm`, …) are installed into `.venv` by `uv sync` — nixifying CUDA is not worth the pain.
+The flake provides: Python 3.11, uv, ffmpeg, tesseract, ruff, plus the native libraries OpenCV/PyTorch need. Python packages (`torch`, `ultralytics`, `lightgbm`, …) are installed into `.venv` by `uv sync`.
+
+### Option B: uv only (no Nix)
+
+Install the system dependencies for your platform, then `uv sync`:
+
+**macOS (Homebrew):**
+
+```bash
+brew install python@3.11 uv ffmpeg tesseract
+```
+
+**Ubuntu / Debian:**
+
+```bash
+sudo apt update
+sudo apt install python3.11 ffmpeg tesseract-ocr libgl1 libglib2.0-0
+# Install uv: https://docs.astral.sh/uv/getting-started/installation/
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then clone and sync:
+
+```bash
+git clone <repo-url>
+cd Clash-Royale-Pod
+uv sync
+uv run crpod --help
+```
 
 ### Verify the environment
 
@@ -31,17 +62,17 @@ uv run pytest
 
 ### Running the pipeline
 
-The HF TV-replay dataset ships structured card placements, so you can skip detection/tracking entirely for dataset replays:
+The HF TV-replay dataset (`chrisrca/clash-royale-tv-replays`) ships raw frame images, not pre-extracted card placements. YOLO detection is required to extract card placements from the frames. You'll need trained YOLO weights (see **Sub-Teams** — the Data & Detection team owns this).
 
 ```bash
-# List available replays
+# List available replays (no weights needed)
 uv run crpod list-replays --arena arena_15
 
-# Analyze one replay → JSON + plots under output/analysis/
-uv run crpod analyze arena_15 <replay_id>
+# Analyze one replay — requires trained YOLO weights
+uv run crpod analyze arena_15 <replay_id> --weights output/models/yolo.pt
 
 # Train an EV model on 50 replays
-uv run crpod train --out output/models/ev.joblib --max-replays 50
+uv run crpod train --weights output/models/yolo.pt --out output/models/ev.joblib --max-replays 50
 ```
 
 For custom video ingest (raw mp4 → YOLO → ByteTrack → OCR → pipeline), see `src/crpod/pipeline.py::analyze_video`. That path is stubbed until the Data & Detection sub-team trains YOLO weights.
@@ -94,7 +125,7 @@ We use the **Shared Repo + Pull Request** workflow. Everyone works on the same r
    git clone https://github.com/<repo-owner>/Clash-Royale-Pod.git
    cd Clash-Royale-Pod
    ```
-3. Open in VS Code and reopen in the dev container (see [Quick Start](#quick-start)).
+3. Set up the environment using either Option A (Nix) or Option B (uv only) above.
 
 That's it. No forks, no upstream remotes. Everyone pushes to the same repo.
 
@@ -278,7 +309,7 @@ After pulling the latest changes from main, check what files changed and follow 
 | What changed | What to do |
 | ------------ | ---------- |
 | `pyproject.toml` / `uv.lock` (new Python packages) | Run `uv sync` — no rebuild needed |
-| `flake.nix` / `flake.lock` (system tools or nixpkgs pin) | Re-enter the shell: `exit` then `nix develop` (or let direnv handle it) |
+| `flake.nix` / `flake.lock` (system tools or nixpkgs pin) | Nix users: re-enter the shell (`exit` then `nix develop`). Non-Nix users: no action needed unless new system deps were added — check the commit message |
 | `Makefile` | No action needed |
 
 `uv sync` is always safe to run.
