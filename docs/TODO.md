@@ -19,7 +19,7 @@ Remaining work to finish the Clash Royale Post-Game Analyzer, grouped by what un
 
 - [ ] **Data & Detection — collect YOLO training data.** 500+ frames annotated in Roboflow with troop/spell/structure bboxes in COCO format. Blocks the entire custom-replay path.
 - [ ] **Data & Detection — train YOLOv8.** Target mAP@0.5 ≥ 0.70. Save weights to `output/models/yolo.pt`. Then implement `Tracker.update` in `src/crpod/tracking/bytetrack.py` wrapping `supervision.ByteTrack`.
-- [ ] **Tracking & Feature Engineering — tune HUD OCR regions.** `HudRegions` in `src/crpod/ocr/hud.py` has placeholder pixel rects. Sample 10 frames from the HF dataset, measure the actual elixir/timer/tower HP regions on 540×960, replace the defaults. Add a test that asserts `pytesseract` recognizes the elixir digit for a saved fixture frame.
+- [x] **Tracking & Feature Engineering — tune HUD OCR regions.** Measured against `arena_15/00a91415-…` frame 251 at 540×960. `HudRegions` now carries empirical rects for enemy/friendly elixir, match timer, and all four princess-tower HP labels (king HPs remain rough guesses — they only render when damaged). `HudReader._read_number` upscales 6× before OCR since the digits are ~20px tall at native res. Fixture `tests/fixtures/hud/sample_540x960.jpg` + `tests/test_hud_ocr.py` assert `pytesseract` reads the enemy elixir digit as `3`.
 
 ## Integration (blocked on YOLO + OCR)
 
