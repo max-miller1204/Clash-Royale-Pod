@@ -29,9 +29,7 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
     if not args.weights.exists():
         sys.exit(f"weights file not found: {args.weights}")
     model = EvModel.load(args.model) if args.model else None
-    result = analyze_hf_replay(
-        args.arena, args.replay_id, yolo_weights=args.weights, model=model
-    )
+    result = analyze_hf_replay(args.arena, args.replay_id, yolo_weights=args.weights, model=model)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
