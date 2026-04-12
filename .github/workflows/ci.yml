@@ -7,52 +7,35 @@ on:
     branches: [main]
 
 jobs:
-  lint-and-format:
-    name: Lint & Format
+  checks:
+    name: Ruff / mypy / pytest (nix develop)
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
         with:
-          python-version: "3.11"
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      - name: Cache /nix/store
+        uses: DeterminateSystems/magic-nix-cache-action@v8
 
-      - name: Install dependencies
-        run: uv sync --frozen
+      - name: Sync dependencies
+        run: nix develop --command uv sync --frozen
 
       - name: Ruff lint
-        run: uv run ruff check .
+        run: nix develop --command uv run ruff check .
 
       - name: Ruff format check
-        run: uv run ruff format --check .
-
-  type-check:
-    name: Type Check
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-
-      - name: Install dependencies
-        run: uv sync --frozen
+        run: nix develop --command uv run ruff format --check .
 
       - name: mypy
-        run: |
-          if find . -name '*.py' -not -path './.venv/*' | grep -q .; then
-            uv run mypy .
-          else
-            echo "No .py files found, skipping mypy"
-          fi
+        run: nix develop --command uv run mypy src
+
+      - name: pytest
+        run: nix develop --command uv run pytest

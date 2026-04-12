@@ -135,6 +135,9 @@ Clash-Royale-Pod/
 | `make lint` | Run ruff linter |
 | `make format` | Auto-format code with ruff |
 | `make type-check` | Run mypy type checker |
+| `make test` | Run pytest suite |
+
+GitHub Actions runs `ruff check`, `ruff format --check`, `mypy src`, and `pytest` on every PR to `main` inside `nix develop`, so CI uses the same toolchain as the local flake. Run `make lint format type-check test` before pushing to catch failures early.
 
 ## Git Workflow
 

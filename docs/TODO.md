@@ -43,7 +43,7 @@ The offline architecture already supports this — the CV stages run ~30-50ms/fr
 ## Stretch goals
 
 - [ ] **Blunder detection.** Top 3 worst plays per match. After the EV model is trained, compare predicted EV vs median EV for each card; plays > 1σ below are blunders. Emit `output/analysis/blunders.json`.
-- [ ] **GitHub Actions CI.** `.github/workflows/ci.yml` running `ruff`, `mypy`, `pytest` on PRs via `cachix/install-nix-action` + `nix develop --command` so CI matches the local flake.
+- [x] **GitHub Actions CI.** `.github/workflows/ci.yml` runs `ruff check`, `ruff format --check`, `mypy src`, and `pytest` on PRs to `main` via `cachix/install-nix-action` + `nix develop --command`, so CI matches the local flake. All four checks pass locally on this branch.
 
 ## Suggested order
 
