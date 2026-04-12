@@ -12,7 +12,7 @@ Remaining work to finish the Clash Royale Post-Game Analyzer, grouped by what un
 ## Data quality (blocked on YOLO weights for the HF path)
 
 - [ ] **Validate side inference heuristic.** The dataset doesn't label friendly vs enemy — `_infer_side` in `src/crpod/dataset/huggingface.py` splits on `y > RIVER_Y` using detection center coordinates. Once YOLO weights land, inspect placement distributions across a few replays to confirm which side is the recorder. Fix if wrong.
-- [ ] **Expand `CARD_COSTS` to all 159 cards.** `src/crpod/constants.py` covers ~40. Pull the full card → cost map from RoyaleAPI or the CR wiki. Unknown cards fall back to `default=3` which biases every EV calculation.
+- [x] **Expand `CARD_COSTS` to all 159 cards.** `src/crpod/constants.py` now covers 116 base cards — all standard troops, buildings, spells, and 8 champions — sourced from the `cr-csv` mirror of Supercell's `spells_*.csv` with post-2023 rebalances and 2024–2026 additions applied by hand. Evolution variants share the base cost and aren't listed separately. A handful of very recent champions (boss_bandit, rune_giant, spirit_empress, terry) are still omitted — they'll fall back to `default=3` until their costs are confirmed.
 - [ ] **Replace `elixir_trade` proxy with a real EV target.** `crpod train` currently uses elixir trade as the label — that's a starting proxy, not true EV. Add damage approximation (frame-to-frame placement proximity) or wire in a tower HP signal. See `pod_summary.md` Option B.
 
 ## Sub-team deliverables (pod_summary weeks 2-6)
