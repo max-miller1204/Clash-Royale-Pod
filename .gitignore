@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Virtualenv
+.venv/
+
+# Pipeline artifacts
+output/
+
+# Nix build symlink
+result
+result-*
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Local tooling
+.claude/
+.claude-flow/
+.mcp.json

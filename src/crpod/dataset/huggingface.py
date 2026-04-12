@@ -96,9 +96,7 @@ class HFReplayLoader:
             token=self.token,
         )
         detector = YoloDetector(self.yolo_weights, conf=self.yolo_conf)
-        return _parquet_to_replay(
-            Path(path), arena=arena, replay_id=replay_id, detector=detector
-        )
+        return _parquet_to_replay(Path(path), arena=arena, replay_id=replay_id, detector=detector)
 
     def stream(self, arena: str | None = None) -> Iterator[Replay]:
         for a, r in self.list_replays(arena=arena):
@@ -122,9 +120,7 @@ def _decode_frames(path: Path) -> Iterator[tuple[int, np.ndarray]]:
             yield int(frame_id), bgr
 
 
-def _parquet_to_replay(
-    path: Path, arena: str, replay_id: str, detector: YoloDetector
-) -> Replay:
+def _parquet_to_replay(path: Path, arena: str, replay_id: str, detector: YoloDetector) -> Replay:
     detections = detector.infer(_decode_frames(path))
     plays = [_detection_to_card_play(d) for d in detections]
     total_frames = max((p.frame for p in plays), default=0)
@@ -138,8 +134,6 @@ def _parquet_to_replay(
     )
 
 
-def load_replay(
-    arena: str, replay_id: str, yolo_weights: Path, **kwargs: object
-) -> Replay:
+def load_replay(arena: str, replay_id: str, yolo_weights: Path, **kwargs: object) -> Replay:
     """Convenience wrapper."""
     return HFReplayLoader(yolo_weights=yolo_weights, **kwargs).load(arena, replay_id)  # type: ignore[arg-type]

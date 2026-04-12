@@ -40,12 +40,8 @@ def build_interactions(
                 end_frame=max(p.frame for p in bucket),
                 friendly_plays=friendly,
                 enemy_plays=enemy,
-                friendly_elixir_spent=sum(
-                    p.elixir_cost or card_cost(p.card) for p in friendly
-                ),
-                enemy_elixir_spent=sum(
-                    p.elixir_cost or card_cost(p.card) for p in enemy
-                ),
+                friendly_elixir_spent=sum(p.elixir_cost or card_cost(p.card) for p in friendly),
+                enemy_elixir_spent=sum(p.elixir_cost or card_cost(p.card) for p in enemy),
             )
         )
         i = j

@@ -25,6 +25,29 @@ If you use direnv, `direnv allow` once and the shell auto-activates on `cd`.
 
 The flake provides: Python 3.11, uv, ffmpeg, tesseract, ruff, plus the native libraries OpenCV/PyTorch need. Python packages (`torch`, `ultralytics`, `lightgbm`, …) are installed into `.venv` by `uv sync`.
 
+#### NixOS users: extra step
+
+`ultralytics` transitively pulls in `opencv-python` (the full GUI build), which `dlopen`s `libxcb.so.1` at import time. NixOS doesn't expose system libs on a standard search path, so the import crashes unless those libs are reachable via [`nix-ld`](https://github.com/Mic92/nix-ld). Add the following to your system config (the host module that sets `programs.nix-ld.enable`):
+
+```nix
+programs.nix-ld = {
+  enable = true;
+  libraries = with pkgs; [
+    zlib
+    xorg.libxcb
+    xorg.libX11
+    xorg.libXext
+    xorg.libSM
+    xorg.libICE
+    libGL
+    glib
+    stdenv.cc.cc.lib  # libstdc++.so.6
+  ];
+};
+```
+
+Then `sudo nixos-rebuild switch` and open a new shell. Your shell must export `LD_LIBRARY_PATH=$NIX_LD_LIBRARY_PATH` for pip-installed wheels to find these libs. Mac and Windows users don't need any of this — those platforms ship the libs by default.
+
 ### Option B: uv only (no Nix)
 
 Install the system dependencies for your platform, then `uv sync`:
