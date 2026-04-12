@@ -26,6 +26,8 @@ def _cmd_list(args: argparse.Namespace) -> int:
 
 
 def _cmd_analyze(args: argparse.Namespace) -> int:
+    if not args.weights.exists():
+        sys.exit(f"weights file not found: {args.weights}")
     model = EvModel.load(args.model) if args.model else None
     result = analyze_hf_replay(
         args.arena, args.replay_id, yolo_weights=args.weights, model=model
@@ -55,6 +57,8 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
 
 
 def _cmd_train(args: argparse.Namespace) -> int:
+    if not args.weights.exists():
+        sys.exit(f"weights file not found: {args.weights}")
     loader = HFReplayLoader(yolo_weights=args.weights)
     rows: list[dict] = []
     targets: list[float] = []
