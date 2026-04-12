@@ -20,6 +20,10 @@
           zlib
           libGL
           glib
+          libxcb
+          libx11
+          libxext
+          libxdmcp
         ];
 
         devTools = with pkgs; [
