@@ -9,77 +9,31 @@ Remaining work to finish the Clash Royale Post-Game Analyzer, grouped by what un
 - [x] **Update `.gitignore`** for the new layout: `output/`, `.venv/`, `__pycache__/`, `.mypy_cache/`, `.ruff_cache/`, `.pytest_cache/`, `result/` (nix build symlink). Check whether `.claude-flow/` and `.DS_Store` also need rules.
 - [x] **Commit flake + src scaffold and open PR.** Stage `flake.nix`, `.envrc`, `src/`, `tests/`, `pyproject.toml`, `Makefile`, `README.md`, `docs/TODO.md`. Do **not** stage `.claude/`, `.claude-flow/`, `.mcp.json`, `.DS_Store`, `.venv/`. Single commit: `feat: nix flake + crpod pipeline scaffold`.
 
-## Option A spike — KataCR pretrained weights (CLOSED 2026-04-13)
+## YOLO training — completed 2026-04-13
 
-**Verdict: unusable for unit detection, but the spike redirected us to a much better option (see next section).**
+**Option A spike (KataCR pretrained weights) — FAILED.** KataCR's `detector1/2_v0.7.13.pt` are pickled against custom `katacr.yolov8.custom_model` classes (require `PYTHONPATH=/home/max/KataCR` + pinned `ultralytics==8.1.24`). Static elements (towers, HUD) transferred but in-field units (cannon, valkyrie, goblins) had zero detections. 2-year staleness + distribution shift = unusable for unit detection.
 
-**What was tried:** downloaded KataCR's `detector1_v0.7.13.pt` and `detector2_v0.7.13.pt` (Google Drive links in `/home/max/KataCR/README_en.md:63`, ~632 MB each). Ran `scripts/detect_overlay.py` against one `arena_15` replay with `PYTHONPATH=/home/max/KataCR` (the checkpoints are pickled against KataCR's custom `katacr.yolov8.custom_model` classes and fail to deserialize without it).
+**Option D (train fresh on KataCR's public dataset) — SUCCEEDED.** KataCR published their annotated training data separately from their broken weights at [Clash-Royale-Detection-Dataset](https://github.com/wty-yy/Clash-Royale-Detection-Dataset): 6,966 frames, 117,294 boxes, ~150 classes, plain YOLO `.txt` format — trainable on stock ultralytics with no hacks. Trained YOLOv8s for 50 epochs on a brev.dev A4000 ($0.20 total).
 
-**What worked:** static screen elements — all 4 princess towers, both king towers, elixir counters, health bars above units. This is unsurprising because these classes sit at fixed relative coordinates every frame.
+**Results:** mAP50 = 0.885, mAP50-95 = 0.667 (target was ≥ 0.70). Towers, buildings, in-field troops, health bars all detected on HF dataset frames. Known weakness: card-hand thumbnails at screen edges misclassified as `emote` — irrelevant since pipeline reads placements, not hand contents.
 
-**What failed:**
-- **In-field units not localized.** Cannon, valkyrie, goblins on the board — no bboxes at all, not even wrong ones. Detector's `bar` class picks up the health bars but the unit bodies are not boxed. So there's no localization signal to bootstrap annotation from.
-- **New card art breaks it.** Pancake tower cosmetic skin boxed as a troop; king-tower decorations from new skins boxed as "goblins"; "dagger-duchess-tower-bar" false-positive on board decorations. Expected 2-year staleness but the extent confirms transfer is broken on dynamic elements.
-- **KataCR modified ultralytics internals.** Custom model classes in the checkpoint require their pinned `ultralytics==8.1.24`, risking conflicts with anything newer. Even if we hacked compatibility, we would inherit their fork as a maintenance burden.
+**Artifacts:**
+- Trained weights: `output/models/crpod_v1_best.pt` (22 MB, YOLOv8s, ~150 KataCR classes)
+- Label converter: `scripts/convert_katacr_labels.py` (12-col → 5-col)
+- Overlay inspector: `scripts/detect_overlay.py`
+- Brev training script: `scripts/brev_train.sh` (end-to-end clone→convert→train, CUDA 12.8 torch fix baked in)
+- Re-trainable anytime for ~$0.20 via `brev create --type hyperstack_A4000`
 
-**Why we're NOT salvaging this as a HUD-only detector:** towers and elixir UI sit at fixed pixel coordinates. The existing `HudRegions` pixel-rect approach in `src/crpod/ocr/hud.py` handles them with ~10 lines of array slicing. Adding a dual-detector runtime + `PYTHONPATH=/home/max/KataCR` hack + 938 MB of weights to replace fixed-coordinate cropping is architectural overkill. The only reason to run YOLO on the HUD is if positions were *not* fixed — they are.
+## Data quality (NOW UNBLOCKED by YOLO weights)
 
-**Cleanup — delete exactly these to retire the spike:**
-- `scripts/detect_overlay.py`
-- `output/models/detector1_v0.7.13.pt`, `output/models/detector2_v0.7.13.pt` (~938 MB combined)
-- `output/overlays/` (spike render PNGs)
-
-No `src/crpod/` code was touched; no rollback work in the library. Keep this section as the postmortem until the spike is cleaned up.
-
-## Critical path — train fresh YOLO on KataCR's public dataset (Option D)
-
-**Status:** unblocked. This is the new critical path. Supersedes the earlier "collect 500 frames + annotate in Roboflow" plan (Option C), which is no longer needed for v1.
-
-**The find:** KataCR's training DATA is public and separate from the broken weights. Cloned to `Clash-Royale-Detection-Dataset/` at the worktree root. Contents:
-
-- **6,939 labeled real-video frames** under `images/part2/` across 28 video sessions (`OYASSU_*`, `WTY_*`, `lan77_*`, 2021–2024). Manifest at `images/part2/annotation.txt`.
-- **1,816-frame mini subset** at `images/part2/train_annotation_mini.txt` for quick training iterations.
-- **566×896 resolution**, very close to the HF dataset's 540×960 (same mobile portrait ~2:3 aspect). Ultralytics resizes to 640 during training, so the gap is negligible.
-- **~150 classes** with per-class friendly/enemy counts tracked in `version_info/annotation_v0.14.csv`. Strong coverage for common cards (`queen-tower` 13k/13k, `skeleton` 2.7k/780, `hog-rider` 1.2k/60, `musketeer` 2.5k/31) and thin tails for rare ones (some at 0–30 examples — those will be weak in the trained model but that's fine, rare cards matter less for EV signal).
-- **154 sliced sprite directories** under `images/segment/` for synthetic data generation via `generator.py` — optional augmentation for rare classes later.
-- **No custom ultralytics classes in the label format** — annotations are plain YOLO `.txt` files, trainable on modern ultralytics directly. No `PYTHONPATH` hack.
-
-**Label format caveat:** KataCR's `.txt` files have 12 values per line instead of YOLOv8's 5: `class cx cy w h belonging 0 0 0 0 0 0`. The extra columns encode which side the unit belongs to (friendly/enemy) plus 6 reserved zeros. Standard ultralytics training ignores anything past column 5, but some versions warn or error — safest to pre-process into a copy with only the first 5 columns. One small script.
-
-**Staleness:** latest session is `WTY_20240406`, so ~1 year of new cards/skins are missing (berserker, newer tower skins, newer evolutions). For v1 this is acceptable — the HF dataset is old enough that most frames pre-date the gap anyway. For v2, supplement with targeted HF annotation on whatever new cards the trained detector whiffs on.
-
-**Concrete steps — order matters:**
-
-1. **Gitignore the dataset clone.** Add `Clash-Royale-Detection-Dataset/` to `.gitignore` before anything gets staged. It's ~700 MB.
-2. **Label-format converter.** Write `scripts/convert_katacr_labels.py` that walks `Clash-Royale-Detection-Dataset/images/part2/**/*.txt` and writes a parallel tree under `output/katacr_yolo/labels/` with only the first 5 columns. Symlink or copy JPGs alongside.
-3. **Build a `data.yaml` for modern ultralytics.** Class indices need to match KataCR's `label_list.py`. Start from `/home/max/KataCR/katacr/yolov8/ClashRoyale_detection.yaml` (already in YOLOv8 format, 150 classes) — copy it, point `path`/`train`/`val` at the converted layout, drop the `pad_*` classes which are placeholder reserved slots.
-4. **Train a small model as a smoke test.** `yolo train data=output/katacr_yolo/data.yaml model=yolov8n.pt epochs=10 imgsz=640` on the mini subset (1,816 frames). Target: any reasonable mAP to prove the pipeline end-to-end, not final quality. Budget: one evening on local GPU, or rent an A100 hour.
-5. **Test the resulting weights against HF frames** using `scripts/detect_overlay.py` on the same `arena_15` replay as the Option A spike. Compare visually: do units now get boxes? If yes → full training run. If no → the resolution/distribution gap is real and needs domain adaptation.
-6. **Full training run** on all 6,939 frames once the smoke test passes. Save to `output/models/crpod_yolov8n.pt`. This is the weights file the pipeline ships with.
-7. **Optional: domain-adapt on 50–100 HF frames** if step 5 showed a gap. Annotate in Roboflow, fine-tune for a few epochs on top of the KataCR-trained weights. Two orders of magnitude less annotation work than the original 500-frame plan.
-8. **Wire into the HF pipeline** — this is already done. `YoloDetector` reads class names from the checkpoint, so whatever taxonomy you train with just appears. The only plumbing left is the name-mapping for `CARD_COSTS` lookups (`spear-goblin` → `spear_goblins`, `the-log` → `log`) and a decision on how to handle the 100+ classes KataCR labels that aren't in your `CARD_COSTS` table.
-
-**What the taxonomy work from earlier becomes:** obsolete for v1. The 40-class plan (30 cards + 3 unknowns + 2 towers + 3 HUD) was designed for the 500-frame budget. With 150 classes and 6,939 frames available for free, just use KataCR's taxonomy as-is. The `CARD_COSTS` expansion task in the data-quality section is still worth doing — expand it to cover KataCR's full card list, not your original 30, so downstream EV calculations get real costs for every class the new detector produces.
-
-**Cleanup if Option D also fails** (e.g., training diverges or weights don't transfer to HF frames):
-- `Clash-Royale-Detection-Dataset/` (cloned repo, ~700 MB)
-- `output/katacr_yolo/` (converted labels)
-- `output/models/crpod_yolov8n.pt` (trained weights)
-- `scripts/convert_katacr_labels.py`
-- This section
-
-At that point the fallback is the original Option C (500 Roboflow frames from scratch), with the earlier 40-class taxonomy work still valid.
-
-## Data quality (blocked on YOLO weights for the HF path)
-
-- [ ] **Validate side inference heuristic.** The dataset doesn't label friendly vs enemy — `_infer_side` in `src/crpod/dataset/huggingface.py` splits on `y > RIVER_Y` using detection center coordinates. Once YOLO weights land, inspect placement distributions across a few replays to confirm which side is the recorder. Fix if wrong.
-- [ ] **Expand `CARD_COSTS` to all 159 cards.** `src/crpod/constants.py` covers ~40. Pull the full card → cost map from RoyaleAPI or the CR wiki. Unknown cards fall back to `default=3` which biases every EV calculation.
+- [ ] **Validate side inference heuristic.** The dataset doesn't label friendly vs enemy — `_infer_side` in `src/crpod/dataset/huggingface.py` splits on `y > RIVER_Y` using detection center coordinates. Now that weights are available, inspect placement distributions across a few replays to confirm which side is the recorder. Fix if wrong.
+- [ ] **Expand `CARD_COSTS` to cover KataCR's ~150 classes.** `src/crpod/constants.py` covers ~40. The trained model outputs KataCR class names (e.g. `the-log`, `spear-goblin`) which don't match the current underscore convention (`log`, `spear_goblins`). Need both a name-mapping layer (hyphens → underscores, known aliases) and full cost coverage so `card_cost()` returns real values instead of the `default=3` fallback that biases every EV calculation.
 - [ ] **Replace `elixir_trade` proxy with a real EV target.** `crpod train` currently uses elixir trade as the label — that's a starting proxy, not true EV. Add damage approximation (frame-to-frame placement proximity) or wire in a tower HP signal. See `pod_summary.md` Option B.
 
 ## Sub-team deliverables (pod_summary weeks 2-6)
 
-- [ ] **Data & Detection — collect YOLO training data.** 500+ frames annotated in Roboflow with troop/spell/structure bboxes in COCO format. Blocks the entire custom-replay path.
-- [ ] **Data & Detection — train YOLOv8.** Target mAP@0.5 ≥ 0.70. Save weights to `output/models/yolo.pt`. Then implement `Tracker.update` in `src/crpod/tracking/bytetrack.py` wrapping `supervision.ByteTrack`.
+- [x] **Data & Detection — collect YOLO training data.** Superseded by KataCR's public dataset (6,966 frames, 117,294 boxes). No Roboflow annotation needed.
+- [x] **Data & Detection — train YOLOv8.** mAP@0.5 = 0.885 (target was ≥ 0.70). Weights at `output/models/crpod_v1_best.pt`. Still TODO: implement `Tracker.update` in `src/crpod/tracking/bytetrack.py` wrapping `supervision.ByteTrack`.
 - [ ] **Tracking & Feature Engineering — tune HUD OCR regions.** `HudRegions` in `src/crpod/ocr/hud.py` has placeholder pixel rects. Sample 10 frames from the HF dataset, measure the actual elixir/timer/tower HP regions on 540×960, replace the defaults. Add a test that asserts `pytesseract` recognizes the elixir digit for a saved fixture frame.
 
 ## Integration (blocked on YOLO + OCR)
@@ -89,7 +43,7 @@ At that point the fallback is the original Option C (500 Roboflow frames from sc
 
 ## Real-time mode (scope expansion past the 10-week timeline)
 
-The offline architecture already supports this — the CV stages run ~30-50ms/frame on a mid-range GPU, well under the 100ms budget. What's missing is the streaming glue. Blocked on YOLO weights (#12) and HUD OCR tuning (#13).
+The offline architecture already supports this — the CV stages run ~30-50ms/frame on a mid-range GPU, well under the 100ms budget. What's missing is the streaming glue. YOLO weights are now available (`crpod_v1_best.pt`); still blocked on HUD OCR tuning and ByteTrack integration.
 
 - [ ] **Streaming replay builder.** Add `src/crpod/pipeline/stream.py` with a `StreamingReplay` class that consumes `CardPlay`/`HudState` events as they arrive and yields completed `Interaction`s when the 40-frame window closes. Reuse `running_tempo` and `ElixirLedger` incrementally — neither needs the full play list upfront.
 - [ ] **Screen capture source.** Extend `src/crpod/dataset/video.py` so `VideoFrameIterator` accepts an integer device index (`cv2.VideoCapture(0)`) or an scrcpy/mss source in addition to file paths. For a phone game, use scrcpy USB mirroring (KataCR's approach) or an Android emulator on the same machine. macOS needs a capture card or emulator — V4L2 is Linux-only.
@@ -108,4 +62,12 @@ The offline architecture already supports this — the CV stages run ~30-50ms/fr
 
 ## Suggested order
 
-`Smoke test listing → .gitignore → commit PR` gets the scaffold landed before anyone else pulls. **YOLO weights are now the critical-path blocker** — both the HF-dataset path and the custom-video path require them. Once the Data & Detection team delivers `yolo.pt`, the HF-dataset path (side inference → CARD_COSTS → EV target → blunder detection) unblocks. OCR tuning and `analyze_video` wiring are independent of HF analysis and can proceed in parallel once weights exist.
+**YOLO weights are no longer the blocker** — `crpod_v1_best.pt` is trained and validated. The new critical path is wiring the weights into the analysis pipeline:
+
+1. **Name mapping + CARD_COSTS expansion** — must happen before any analysis produces meaningful output. KataCR class names (`the-log`, `spear-goblin`) need to map to `CARD_COSTS` keys. Expand costs to cover ~150 classes.
+2. **Validate side inference** — run the detector on a few replays, check `_infer_side` y-split.
+3. **ByteTrack tracker** — implement `Tracker.update` so detections become tracked objects across frames.
+4. **HUD OCR tuning** — independent of the above, can proceed in parallel.
+5. **Wire `analyze_video` end-to-end** — blocked on tracker + OCR.
+6. **EV target replacement** — once the analysis pipeline produces real data, replace the elixir-trade proxy.
+7. **Blunder detection + CI** — stretch goals, after core pipeline ships.
