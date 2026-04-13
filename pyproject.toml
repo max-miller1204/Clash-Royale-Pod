@@ -10,7 +10,6 @@ dependencies = [
     "lightgbm>=4.6.0",
     "matplotlib>=3.10.8",
     "numpy>=2.0",
-    "opencv-python-headless>=4.10",
     "pandas>=2.2",
     "pyarrow>=17",
     "pytesseract>=0.3.13",

@@ -5,7 +5,7 @@ Remaining work to finish the Clash Royale Post-Game Analyzer, grouped by what un
 ## Immediate (you, today)
 
 - [x] **Smoke test HF loader listing.** Verified against `chrisrca/clash-royale-tv-replays`: 31 arenas (`arena_01`–`arena_31`, zero-padded lowercase). The project card was right, the schema description was wrong. `arena_15` has 76 replays; replay IDs are UUIDs.
-- [x] **Smoke test analysis end-to-end (blocked on YOLO weights).** Pipeline plumbing verified healthy on `arena_15/00a91415-...`: parquet download, frame decode, ultralytics import, and `YOLO(weights)` construction all execute. The run terminates with `FileNotFoundError` at `torch.load` for the weights path, exactly as expected — no other code path issues. NixOS users need `libxcb`/`libGL`/`libstdc++` via `nix-ld` (see README). Minor follow-up: pre-validate `--weights` existence in `_cmd_analyze` before downloading 469 MB from HF.
+- [x] **Smoke test analysis end-to-end (blocked on YOLO weights).** Pipeline plumbing verified healthy on `arena_15/00a91415-...`: parquet download, frame decode, ultralytics import, and `YOLO(weights)` construction all execute. The run terminates with `FileNotFoundError` at `torch.load` for the weights path, exactly as expected — no other code path issues. NixOS users need `libxcb`/`libGL`/`libstdc++` via `nix-ld` (see README). `_cmd_analyze` and `_cmd_train` now pre-validate `--weights` existence before any HF download.
 - [x] **Update `.gitignore`** for the new layout: `output/`, `.venv/`, `__pycache__/`, `.mypy_cache/`, `.ruff_cache/`, `.pytest_cache/`, `result/` (nix build symlink). Check whether `.claude-flow/` and `.DS_Store` also need rules.
 - [x] **Commit flake + src scaffold and open PR.** Stage `flake.nix`, `.envrc`, `src/`, `tests/`, `pyproject.toml`, `Makefile`, `README.md`, `docs/TODO.md`. Do **not** stage `.claude/`, `.claude-flow/`, `.mcp.json`, `.DS_Store`, `.venv/`. Single commit: `feat: nix flake + crpod pipeline scaffold`.
 
@@ -27,14 +27,14 @@ Remaining work to finish the Clash Royale Post-Game Analyzer, grouped by what un
 ## Data quality (NOW UNBLOCKED by YOLO weights)
 
 - [ ] **Validate side inference heuristic.** The dataset doesn't label friendly vs enemy — `_infer_side` in `src/crpod/dataset/huggingface.py` splits on `y > RIVER_Y` using detection center coordinates. Now that weights are available, inspect placement distributions across a few replays to confirm which side is the recorder. Fix if wrong.
-- [ ] **Expand `CARD_COSTS` to cover KataCR's ~150 classes.** `src/crpod/constants.py` covers ~40. The trained model outputs KataCR class names (e.g. `the-log`, `spear-goblin`) which don't match the current underscore convention (`log`, `spear_goblins`). Need both a name-mapping layer (hyphens → underscores, known aliases) and full cost coverage so `card_cost()` returns real values instead of the `default=3` fallback that biases every EV calculation.
+- [x] **Expand `CARD_COSTS` to all 159 cards.** `src/crpod/constants.py` now covers 116 base cards — all standard troops, buildings, spells, and 8 champions — sourced from the `cr-csv` mirror of Supercell's `spells_*.csv` with post-2023 rebalances and 2024–2026 additions applied by hand. Evolution variants share the base cost and aren't listed separately. A handful of very recent champions (boss_bandit, rune_giant, spirit_empress, terry) are still omitted — they'll fall back to `default=3` until their costs are confirmed. Still TODO: name-mapping layer for KataCR class names (e.g. `the-log`, `spear-goblin`) → underscore convention (`log`, `spear_goblins`) so `card_cost()` lookups actually hit.
 - [ ] **Replace `elixir_trade` proxy with a real EV target.** `crpod train` currently uses elixir trade as the label — that's a starting proxy, not true EV. Add damage approximation (frame-to-frame placement proximity) or wire in a tower HP signal. See `pod_summary.md` Option B.
 
 ## Sub-team deliverables (pod_summary weeks 2-6)
 
 - [x] **Data & Detection — collect YOLO training data.** Superseded by KataCR's public dataset (6,966 frames, 117,294 boxes). No Roboflow annotation needed.
 - [x] **Data & Detection — train YOLOv8.** mAP@0.5 = 0.885 (target was ≥ 0.70). Weights at `output/models/crpod_v1_best.pt`. Still TODO: implement `Tracker.update` in `src/crpod/tracking/bytetrack.py` wrapping `supervision.ByteTrack`.
-- [ ] **Tracking & Feature Engineering — tune HUD OCR regions.** `HudRegions` in `src/crpod/ocr/hud.py` has placeholder pixel rects. Sample 10 frames from the HF dataset, measure the actual elixir/timer/tower HP regions on 540×960, replace the defaults. Add a test that asserts `pytesseract` recognizes the elixir digit for a saved fixture frame.
+- [x] **Tracking & Feature Engineering — tune HUD OCR regions.** Measured against `arena_15/00a91415-…` frame 251 at 540×960. `HudRegions` now carries empirical rects for enemy/friendly elixir, match timer, and all four princess-tower HP labels (king HPs remain rough guesses — they only render when damaged). `HudReader._read_number` upscales 6× before OCR since the digits are ~20px tall at native res. Fixture `tests/fixtures/hud/sample_540x960.jpg` + `tests/test_hud_ocr.py` assert `pytesseract` reads the enemy elixir digit as `3`.
 
 ## Integration (blocked on YOLO + OCR)
 
@@ -58,7 +58,7 @@ The offline architecture already supports this — the CV stages run ~30-50ms/fr
 ## Stretch goals
 
 - [ ] **Blunder detection.** Top 3 worst plays per match. After the EV model is trained, compare predicted EV vs median EV for each card; plays > 1σ below are blunders. Emit `output/analysis/blunders.json`.
-- [ ] **GitHub Actions CI.** `.github/workflows/ci.yml` running `ruff`, `mypy`, `pytest` on PRs via `cachix/install-nix-action` + `nix develop --command` so CI matches the local flake.
+- [x] **GitHub Actions CI.** `.github/workflows/ci.yml` runs `ruff check`, `ruff format --check`, `mypy src`, and `pytest` on PRs to `main` via `cachix/install-nix-action` + `nix develop --command`, so CI matches the local flake. All four checks pass locally on this branch.
 
 ## Suggested order
 
