@@ -28,8 +28,16 @@ def _draw(img: np.ndarray, dets: list[Detection]) -> np.ndarray:
         x1, y1, x2, y2 = (int(v) for v in d.xyxy)
         cv2.rectangle(out, (x1, y1), (x2, y2), (0, 255, 0), 2)
         label = f"{d.cls} {d.confidence:.2f}"
-        cv2.putText(out, label, (x1, max(y1 - 4, 10)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1, cv2.LINE_AA)
+        cv2.putText(
+            out,
+            label,
+            (x1, max(y1 - 4, 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.4,
+            (0, 255, 0),
+            1,
+            cv2.LINE_AA,
+        )
     return out
 
 
@@ -38,8 +46,9 @@ def main() -> None:
     p.add_argument("--weights", type=Path, required=True)
     p.add_argument("--arena", required=True)
     p.add_argument("--replay", required=True)
-    p.add_argument("--frames", default="0,30,60,120,240",
-                   help="comma-separated frame indices to render")
+    p.add_argument(
+        "--frames", default="0,30,60,120,240", help="comma-separated frame indices to render"
+    )
     p.add_argument("--conf", type=float, default=0.25)
     p.add_argument("--out", type=Path, default=Path("output/overlays"))
     args = p.parse_args()
@@ -47,11 +56,13 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
     wanted = {int(x) for x in args.frames.split(",")}
 
-    parquet_path = Path(hf_hub_download(
-        repo_id=DATASET_ID,
-        filename=f"{args.arena}/{args.replay}/frames.parquet",
-        repo_type="dataset",
-    ))
+    parquet_path = Path(
+        hf_hub_download(
+            repo_id=DATASET_ID,
+            filename=f"{args.arena}/{args.replay}/frames.parquet",
+            repo_type="dataset",
+        )
+    )
 
     frames = [(i, f) for i, f in _decode_frames(parquet_path) if i in wanted]
     if not frames:
