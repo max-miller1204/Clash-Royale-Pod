@@ -109,6 +109,7 @@ CARD_COSTS: dict[str, int] = {
     "golden_knight": 4,
     "monk": 5,
     "little_prince": 3,
+    "royal_guardian": 3,
     "goblin_machine": 5,
     "goblinstein": 5,
     # Buildings
@@ -124,6 +125,7 @@ CARD_COSTS: dict[str, int] = {
     "goblin_hut": 5,
     "barbarian_hut": 6,
     "goblin_cage": 4,
+    "goblin_brawler": 4,
     "goblin_drill": 4,
     # Spells
     "fireball": 4,
@@ -148,5 +150,54 @@ CARD_COSTS: dict[str, int] = {
 }
 
 
+# KataCR's YOLO labels use kebab-case and singular for irregular plurals
+# (e.g. `spear-goblin`, `bat`), and split a few cards into per-state classes
+# (`elixir-golem-big/mid/small`, `phoenix-big/egg/small`, `rascal-boy/girl`).
+# This table normalizes those into the keys we use in `CARD_COSTS`.
+_KATACR_ALIASES: dict[str, str] = {
+    # Singular → plural (KataCR labels one unit at a time)
+    "skeleton": "skeletons",
+    "goblin": "goblins",
+    "spear_goblin": "spear_goblins",
+    "bat": "bats",
+    "barbarian": "barbarians",
+    "wall_breaker": "wall_breakers",
+    "archer": "archers",
+    "minion": "minions",
+    "royal_recruit": "royal_recruits",
+    "guard": "guards",
+    "skeleton_dragon": "skeleton_dragons",
+    "zappy": "zappies",
+    "elite_barbarian": "elite_barbarians",
+    "royal_hog": "royal_hogs",
+    # Multi-state classes → single base card cost
+    "elixir_golem_big": "elixir_golem",
+    "elixir_golem_mid": "elixir_golem",
+    "elixir_golem_small": "elixir_golem",
+    "phoenix_big": "phoenix",
+    "phoenix_egg": "phoenix",
+    "phoenix_small": "phoenix",
+    "rascal_boy": "rascals",
+    "rascal_girl": "rascals",
+    # Punctuation differences
+    "x_bow": "xbow",
+}
+
+
+def normalize_card_name(raw: str) -> str:
+    """Normalize a card label (KataCR or otherwise) to a `CARD_COSTS` key.
+
+    Pure: no I/O. The pipeline is lower-case → `-`/space → `_` → alias lookup
+    → strip leading `the_`. Returns the normalized key whether or not it
+    appears in `CARD_COSTS`; callers (e.g. `card_cost`) handle misses.
+    """
+    name = raw.strip().lower().replace("-", "_").replace(" ", "_")
+    if name in _KATACR_ALIASES:
+        return _KATACR_ALIASES[name]
+    if name.startswith("the_"):
+        name = name[len("the_") :]
+    return name
+
+
 def card_cost(card: str, default: int = 3) -> int:
-    return CARD_COSTS.get(card.lower().replace(" ", "_"), default)
+    return CARD_COSTS.get(normalize_card_name(card), default)

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
+import tempfile
 from dataclasses import dataclass
 
 import cv2
@@ -61,9 +64,20 @@ class HudReader:
         # The HUD digits are ~20px tall at 540x960 — upscale before OCR so
         # Tesseract's feature extractor has enough resolution to work with.
         upscaled = cv2.resize(crop, None, fx=6, fy=6, interpolation=cv2.INTER_CUBIC)
-        txt = self._pytesseract.image_to_string(
-            upscaled, config="--psm 7 -c tessedit_char_whitelist=0123456789"
-        ).strip()
+        # Pass a realpath-resolved file path rather than a numpy array: the
+        # nix-built tesseract on macOS can't follow the /tmp -> /private/tmp
+        # symlink that pytesseract's default tempfile flow lands on.
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            tmp_path = f.name
+        try:
+            cv2.imwrite(tmp_path, upscaled)
+            txt = self._pytesseract.image_to_string(
+                os.path.realpath(tmp_path),
+                config="--psm 7 -c tessedit_char_whitelist=0123456789",
+            ).strip()
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(tmp_path)
         try:
             return int(txt) if txt else None
         except ValueError:
