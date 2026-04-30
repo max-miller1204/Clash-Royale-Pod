@@ -33,13 +33,13 @@ Remaining work to finish the Clash Royale Post-Game Analyzer, grouped by what un
 ## Sub-team deliverables (pod_summary weeks 2-6)
 
 - [x] **Data & Detection — collect YOLO training data.** Superseded by KataCR's public dataset (6,966 frames, 117,294 boxes). No Roboflow annotation needed.
-- [x] **Data & Detection — train YOLOv8.** mAP@0.5 = 0.885 (target was ≥ 0.70). Weights at `output/models/crpod_v1_best.pt`. Still TODO: implement `Tracker.update` in `src/crpod/tracking/bytetrack.py` wrapping `supervision.ByteTrack`.
+- [x] **Data & Detection — train YOLOv8.** mAP@0.5 = 0.885 (target was ≥ 0.70). Weights at `output/models/crpod_v1_best.pt`.
 - [x] **Tracking & Feature Engineering — tune HUD OCR regions.** Measured against `arena_15/00a91415-…` frame 251 at 540×960. `HudRegions` now carries empirical rects for enemy/friendly elixir, match timer, and all four princess-tower HP labels (king HPs remain rough guesses — they only render when damaged). `HudReader._read_number` upscales 6× before OCR since the digits are ~20px tall at native res. Fixture `tests/fixtures/hud/sample_540x960.jpg` + `tests/test_hud_ocr.py` assert `pytesseract` reads the enemy elixir digit as `3`.
 
 ## Integration (blocked on YOLO + OCR)
 
 - [x] **Wire HF replay path through YOLO.** The HF dataset contains raw frame images, not pre-extracted placements. `_parquet_to_replay` now decodes frames from parquet and runs `YoloDetector` to extract `CardPlay` events. `analyze` and `train` CLI subcommands require `--weights`. Blocked on trained weights landing.
-- [ ] **Wire `analyze_video` end-to-end.** In `src/crpod/pipeline.py`: `VideoFrameIterator → YoloDetector → Tracker → HudReader → CardPlay/HudState stream → analyze_replay`. Add a `crpod analyze-video PATH` CLI subcommand.
+- [x] **Wire `analyze_video` end-to-end.** In `src/crpod/pipeline.py`: `VideoFrameIterator → YoloDetector → Tracker → HudReader → CardPlay/HudState stream → analyze_replay`. The `crpod analyze-video PATH` CLI subcommand pre-validates inputs (video, weights, optional EV model, `--target-fps`) before any heavy import, writes `summary.json` with `replay_id`/`arena`/`source_video`/`n_plays`/`n_interactions`/`friendly_leak`/`enemy_leak`, and degrades viz failures to a stderr warning. See `specs/001-analyze-video/`.
 
 ## Real-time mode (scope expansion past the 10-week timeline)
 
