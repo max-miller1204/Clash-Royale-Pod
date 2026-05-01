@@ -23,24 +23,11 @@ from crpod.types import CardPlay, Side
 _log = logging.getLogger(__name__)
 _warned: set[str] = set()
 
-# Cards whose elixir cost Supercell hasn't published yet (or has a special
-# variable cost, in the case of mirror). They may appear as values in
-# KATACR_TO_CARD without a matching CARD_COSTS row; the validity test
-# allows this. ``card_cost()`` falls back to ``default=3`` for them.
-_KNOWN_UNCONFIRMED_COSTS: Final[frozenset[str]] = frozenset(
-    {
-        # Champions whose costs aren't published yet
-        "boss_bandit",
-        "rune_giant",
-        "spirit_empress",
-        "terry",
-        # Recently-released cards needing source verification
-        "goblin_brawler",
-        "royal_guardian",
-        # Variable-cost card (mirror = cost of last card played)
-        "mirror",
-    }
-)
+# Historically held card names whose elixir cost Supercell hadn't yet
+# published. All entries have since been resolved (see CARD_COSTS) or
+# reclassified as spawned subunits in KATACR_NON_CARD. Kept as a named
+# (empty) constant for the validity test in tests/test_cards.py.
+_KNOWN_UNCONFIRMED_COSTS: Final[frozenset[str]] = frozenset()
 
 # KataCR class name -> canonical CARD_COSTS key. Generated against
 # ``katacr_classes.txt`` (derived from upstream KataCR's public
@@ -90,10 +77,7 @@ KATACR_TO_CARD: dict[str, str] = {
     "tesla-evolution": "tesla",
     "valkyrie-evolution": "valkyrie",
     "wall-breaker-evolution": "wall_breakers",
-    # Cards needing cost source verification (see _KNOWN_UNCONFIRMED_COSTS)
     "mirror": "mirror",
-    "goblin-brawler": "goblin_brawler",
-    "royal-guardian": "royal_guardian",
     # Standard cards (kebab-case in KataCR -> underscore in CARD_COSTS)
     "archer-queen": "archer_queen",
     "arrows": "arrows",
@@ -202,8 +186,12 @@ KATACR_NON_CARD: frozenset[str] = frozenset(
         "emote",
         "evolution-symbol",
         "goblin-ball",
+        # Spawned subunits (cage/ability outputs, not card plays) —
+        # same pattern as golemite/lava-pup/hog below.
+        "goblin-brawler",
         "golemite",
         "hog",
+        "royal-guardian",
         "ice-spirit-evolution-symbol",
         "king-tower",
         "king-tower-bar",

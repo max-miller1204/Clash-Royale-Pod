@@ -85,21 +85,53 @@ class TestToCardPlay:
 
 
 class TestMappingValidity:
-    def test_every_alias_target_has_known_cost_or_is_unconfirmed_champion(self):
-        """Each value in KATACR_TO_CARD must be a key in CARD_COSTS, OR one
-        of the 4 champions whose costs Supercell hasn't published yet."""
-        bad = []
-        for katacr_name, canonical in KATACR_TO_CARD.items():
-            if canonical in CARD_COSTS:
-                continue
-            if canonical in _KNOWN_UNCONFIRMED_COSTS:
-                continue
-            bad.append(f"{katacr_name!r} -> {canonical!r}")
+    def test_every_alias_target_has_known_cost(self):
+        """Every canonical target in KATACR_TO_CARD must have a row in
+        CARD_COSTS. The historical 'unconfirmed' escape hatch is gone."""
+        bad = [
+            f"{katacr_name!r} -> {canonical!r}"
+            for katacr_name, canonical in KATACR_TO_CARD.items()
+            if canonical not in CARD_COSTS
+        ]
         assert not bad, "KATACR_TO_CARD has aliases pointing nowhere:\n  " + "\n  ".join(bad)
+
+    def test_known_unconfirmed_costs_is_empty(self):
+        """Sentinel: the set must stay empty. If a new card appears whose
+        cost is genuinely unknown, add it to CARD_COSTS with a sourced
+        value rather than re-populating this set."""
+        assert _KNOWN_UNCONFIRMED_COSTS == frozenset()
 
     def test_no_overlap_between_card_and_non_card(self):
         overlap = set(KATACR_TO_CARD.keys()) & KATACR_NON_CARD
         assert not overlap, f"classes in both card and non-card sets: {overlap}"
+
+    @pytest.mark.parametrize(
+        ("card", "expected_cost"),
+        [
+            ("boss_bandit", 6),
+            ("rune_giant", 4),
+            ("spirit_empress", 6),
+            ("terry", 4),
+            ("mirror", 1),
+        ],
+    )
+    def test_wave_1b_costs_are_present(self, card, expected_cost):
+        """Costs sourced in the Wave 1B commit (see commit message for
+        per-card citations). Spirit Empress stores the headline 6-elixir
+        cost; Mirror stores the +1 surcharge from spells_other.csv."""
+        assert card in CARD_COSTS, f"{card} missing from CARD_COSTS"
+        assert CARD_COSTS[card] == expected_cost, (
+            f"{card} cost mismatch: CARD_COSTS={CARD_COSTS[card]} expected={expected_cost}"
+        )
+
+    @pytest.mark.parametrize("subunit", ["goblin-brawler", "royal-guardian"])
+    def test_spawned_subunits_are_non_card(self, subunit):
+        """Goblin Brawler (spawned by Goblin Cage) and Royal Guardian
+        (spawned by Little Prince's Royal Rescue ability) are not card
+        plays — they should be filtered out alongside golemite/lava-pup/
+        hog rather than producing CardPlay events."""
+        assert subunit in KATACR_NON_CARD
+        assert subunit not in KATACR_TO_CARD
 
 
 class TestSnapshotCoverage:

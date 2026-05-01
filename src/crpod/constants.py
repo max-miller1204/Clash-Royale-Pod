@@ -125,6 +125,19 @@ CARD_COSTS: dict[str, int] = {
     "little_prince": 3,
     "goblin_machine": 5,
     "goblinstein": 5,
+    "boss_bandit": 6,
+    # `terry` was a temporary Super Champion event card (active 2023-01-05
+    # through 2023-09-05); kept here because the YOLO mapping covers it
+    # and historical replays may still surface it.
+    "terry": 4,
+    # Recently-released non-champion troops previously parked in
+    # _KNOWN_UNCONFIRMED_COSTS — both confirmed against in-game card view.
+    "rune_giant": 4,
+    # Spirit Empress has a dual-form deploy: 3 elixir as the ground troop,
+    # 6 elixir as the dragon (auto-selected based on available elixir).
+    # CARD_COSTS stores the headline 6-elixir value; downstream code that
+    # needs the alternate must special-case it.
+    "spirit_empress": 6,
     # Buildings
     "cannon": 3,
     "tesla": 4,
@@ -159,6 +172,12 @@ CARD_COSTS: dict[str, int] = {
     "goblin_barrel": 3,
     "goblin_curse": 3,
     "void": 3,
+    # Mirror is variable-cost: effective deploy cost is
+    # `last_card_played.cost + 1`, clamped to [2, 10]. The 1 here matches
+    # Supercell's `spells_other.csv:Mirror.ManaCost` (the surcharge).
+    # Callers that need the effective per-play cost must reconstruct it
+    # from the previous CardPlay; this constant is only a fallback.
+    "mirror": 1,
 }
 
 
