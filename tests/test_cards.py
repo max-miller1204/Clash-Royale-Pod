@@ -4,13 +4,7 @@ from __future__ import annotations
 
 import logging
 
-import pytest
-
-from crpod.detection.cards import (
-    KATACR_NON_CARD,
-    KATACR_TO_CARD,
-    to_card_play,
-)
+from crpod.detection.cards import KATACR_TO_CARD, to_card_play
 from crpod.detection.yolo import Detection
 from crpod.types import CardPlay, Side
 
