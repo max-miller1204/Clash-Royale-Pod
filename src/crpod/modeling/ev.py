@@ -35,6 +35,24 @@ def interaction_features(interaction: Interaction) -> dict[str, Any]:
     }
 
 
+def _frame_with_categoricals(rows: list[dict[str, Any]]) -> Any:
+    """Build a DataFrame from feature rows with string columns coerced to
+    object-backed `category` dtype.
+
+    pandas 3.0 made string columns default to `StringDtype`, and a category
+    whose categories are str-dtyped trips LightGBM's "must be int/float/bool
+    or category" guard. Forcing strings to plain object first keeps the
+    resulting category compatible with LightGBM 4.x.
+    """
+    import pandas as pd
+
+    df = pd.DataFrame(rows)
+    for c in df.columns:
+        if pd.api.types.is_object_dtype(df[c]) or pd.api.types.is_string_dtype(df[c]):
+            df[c] = df[c].astype(object).astype("category")
+    return df
+
+
 def compute_per_card_stats(
     interactions: Sequence[Interaction],
     targets: Sequence[float],
@@ -69,24 +87,16 @@ class EvModel:
 
     def fit(self, rows: list[dict[str, Any]], target: list[float]) -> None:
         import lightgbm as lgb
-        import pandas as pd
 
-        df = pd.DataFrame(rows)
-        categorical = [c for c in df.columns if df[c].dtype == object]
-        for c in categorical:
-            df[c] = df[c].astype("category")
+        df = _frame_with_categoricals(rows)
+        categorical = [c for c, dt in df.dtypes.items() if str(dt) == "category"]
         self.model = lgb.LGBMRegressor(n_estimators=200, learning_rate=0.05)
         self.model.fit(df, target, categorical_feature=categorical)
 
     def predict(self, rows: list[dict[str, Any]]) -> list[float]:
         if self.model is None:
             raise RuntimeError("EvModel.fit must be called before predict")
-        import pandas as pd
-
-        df = pd.DataFrame(rows)
-        for c in df.columns:
-            if df[c].dtype == object:
-                df[c] = df[c].astype("category")
+        df = _frame_with_categoricals(rows)
         return list(self.model.predict(df))
 
     def save(self, path: Path) -> None:
