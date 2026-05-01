@@ -22,7 +22,8 @@ import numpy as np
 
 from crpod.detection.cards import to_card_play
 from crpod.detection.yolo import YoloDetector
-from crpod.types import Replay
+from crpod.tracking.bytetrack import Tracker
+from crpod.types import CardPlay, Replay
 
 DATASET_ID = "chrisrca/clash-royale-tv-replays"
 
@@ -103,9 +104,20 @@ def _decode_frames(path: Path) -> Iterator[tuple[int, np.ndarray]]:
 
 
 def _parquet_to_replay(path: Path, arena: str, replay_id: str, detector: YoloDetector) -> Replay:
-    detections = detector.infer(_decode_frames(path))
-    plays = [p for p in (to_card_play(d) for d in detections) if p is not None]
-    total_frames = max((p.frame for p in plays), default=0)
+    detections = list(detector.infer(_decode_frames(path)))
+    tracker = Tracker(frame_rate=10)
+    tracks = tracker.update(detections)
+    plays: list[CardPlay] = []
+    for track in tracks:
+        # Drop tracks shorter than 2 frames as detection noise — matches
+        # the video path's `_tracks_to_plays` convention. Anchor at the
+        # first sighting so the CardPlay represents deploy-time placement.
+        if len(track.detections) < 2:
+            continue
+        play = to_card_play(track.detections[0])
+        if play is not None:
+            plays.append(play)
+    total_frames = max((d.frame for d in detections), default=0)
     return Replay(
         replay_id=replay_id,
         arena=arena,
