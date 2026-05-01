@@ -1,6 +1,14 @@
 """Game constants — card costs, arena dimensions, etc.
 
-The HF replay dataset uses a 480x810 play area (x in [-1,479], y in [-1,810]).
+HF replay frames are 540x960 (full image, including HUD bands at top
+and bottom). YOLO detection returns y-coordinates in this full-frame
+pixel space, so `RIVER_Y` must be the *frame* midpoint (480), not the
+midpoint of the cropped play area. The previous values (480x810,
+RIVER_Y=405) under-counted enemy detections — the line cut through the
+enemy princess-tower row, mislabeling units in the band y∈(405, 480)
+as friendly. Verified visually against arena_05/15/22/28/31 mid-match
+frames via `scripts/validate_side_inference.py`.
+
 Card elixir costs are base deploy costs, sourced from Supercell's
 `spells_characters`/`spells_buildings`/`spells_other` CSVs (via the
 cr-csv mirror) with post-2023 additions and rebalances applied by hand.
@@ -8,12 +16,18 @@ Evolution variants share the base card's cost and so are not listed
 separately. Unknown cards fall back to `default` in `card_cost`, which
 is a known source of bias in EV calculations — prefer adding the card
 here over relying on the fallback.
+
+`BRIDGE_LEFT_X` / `BRIDGE_RIGHT_X` are kept at their original 480-wide
+values; in the corrected 540-wide frame they should probably scale to
+~101 / ~439, but they're only consumed by `features.placement.zone_of`
+and weren't part of the side-inference audit. Re-validate before
+trusting `LEFT_LANE`/`RIGHT_LANE` zone classification.
 """
 
 from __future__ import annotations
 
-ARENA_W: int = 480
-ARENA_H: int = 810
+ARENA_W: int = 540
+ARENA_H: int = 960
 RIVER_Y: int = ARENA_H // 2
 BRIDGE_LEFT_X: int = 90
 BRIDGE_RIGHT_X: int = 390

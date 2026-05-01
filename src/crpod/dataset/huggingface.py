@@ -8,8 +8,10 @@ decoded frame images to produce CardPlay events.
 
 Side assignment heuristic: HF dataset captures TV-royale third-person view
 where both players are visible but side isn't labeled. We infer side from
-y-coordinate (y > RIVER_Y → friendly_back half → friendly side). Replace
-with per-replay ground truth if you find it.
+y-coordinate (y >= RIVER_Y → friendly side, with RIVER_Y = frame midpoint
+for the 540x960 frames). Validated visually across five arenas via
+`scripts/validate_side_inference.py`. Replace with per-replay ground truth
+if you find it.
 """
 
 from __future__ import annotations

@@ -52,7 +52,7 @@ class TestToCardPlay:
         assert play.card == "log"
         assert play.elixir_cost == 2  # log is 2 elixir in CARD_COSTS
         assert play.frame == 42
-        assert play.side == Side.FRIENDLY  # cy=600 > RIVER_Y=405
+        assert play.side == Side.FRIENDLY  # cy=600 > RIVER_Y=480
         assert play.x == 240
         assert play.y == 600
 
