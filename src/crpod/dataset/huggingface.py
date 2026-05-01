@@ -20,29 +20,11 @@ from pathlib import Path
 
 import numpy as np
 
-from crpod.constants import RIVER_Y, card_cost
-from crpod.detection.yolo import Detection, YoloDetector
-from crpod.types import CardPlay, Replay, Side
+from crpod.detection.cards import to_card_play
+from crpod.detection.yolo import YoloDetector
+from crpod.types import Replay
 
 DATASET_ID = "chrisrca/clash-royale-tv-replays"
-
-
-def _infer_side(y: int) -> Side:
-    if y < 0:
-        return Side.UNKNOWN
-    return Side.FRIENDLY if y >= RIVER_Y else Side.ENEMY
-
-
-def _detection_to_card_play(det: Detection) -> CardPlay:
-    cx, cy = det.center
-    return CardPlay(
-        frame=det.frame,
-        card=det.cls,
-        x=int(cx),
-        y=int(cy),
-        side=_infer_side(int(cy)),
-        elixir_cost=card_cost(det.cls),
-    )
 
 
 @dataclass
@@ -122,7 +104,7 @@ def _decode_frames(path: Path) -> Iterator[tuple[int, np.ndarray]]:
 
 def _parquet_to_replay(path: Path, arena: str, replay_id: str, detector: YoloDetector) -> Replay:
     detections = detector.infer(_decode_frames(path))
-    plays = [_detection_to_card_play(d) for d in detections]
+    plays = [p for p in (to_card_play(d) for d in detections) if p is not None]
     total_frames = max((p.frame for p in plays), default=0)
     return Replay(
         replay_id=replay_id,
