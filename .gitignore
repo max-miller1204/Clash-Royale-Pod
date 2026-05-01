@@ -31,3 +31,4 @@ result-*
 .claude/
 .claude-flow/
 .mcp.json
+.intent/
