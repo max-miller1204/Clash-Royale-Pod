@@ -1,13 +1,15 @@
 """Expected-value model.
 
-Training target: per-interaction elixir trade + damage delta (a proxy for
-win-probability shift). Features: cards played, placement zones, tempo,
-elixir state at interaction start.
+Training target: per-interaction princess-tower HP delta — see `_training_target`
+in `crpod.__main__`. Features: cards played, placement zones, tempo, elixir
+state at interaction start.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import statistics
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -33,12 +35,37 @@ def interaction_features(interaction: Interaction) -> dict[str, Any]:
     }
 
 
+def compute_per_card_stats(
+    interactions: Sequence[Interaction],
+    targets: Sequence[float],
+    min_samples: int = 5,
+) -> dict[str, tuple[float, float]]:
+    """Group targets by anchor friendly card and return (median, std) per card.
+
+    The anchor is `interaction.friendly_plays[0].card`; rows with empty
+    `friendly_plays` contribute no per-card sample. Cards with fewer than
+    `min_samples` training-fold rows are excluded.
+    """
+    by_card: dict[str, list[float]] = {}
+    for interaction, target in zip(interactions, targets, strict=True):
+        if not interaction.friendly_plays:
+            continue
+        anchor = interaction.friendly_plays[0].card
+        by_card.setdefault(anchor, []).append(float(target))
+    return {
+        card: (statistics.median(values), statistics.pstdev(values))
+        for card, values in by_card.items()
+        if len(values) >= min_samples
+    }
+
+
 @dataclass
 class EvModel:
     """Thin LightGBM wrapper. Training/predict are lazy — the pipeline can
     import and flow data through features even without LightGBM installed."""
 
     model: Any = None
+    per_card_stats: dict[str, tuple[float, float]] = field(default_factory=dict)
 
     def fit(self, rows: list[dict[str, Any]], target: list[float]) -> None:
         import lightgbm as lgb
@@ -67,10 +94,24 @@ class EvModel:
             raise RuntimeError("nothing to save")
         import joblib
 
-        joblib.dump(self.model, path)
+        joblib.dump(
+            {"model": self.model, "per_card_stats": self.per_card_stats},
+            path,
+        )
 
     @classmethod
     def load(cls, path: Path) -> EvModel:
         import joblib
 
-        return cls(model=joblib.load(path))
+        payload = joblib.load(path)
+        # Tolerate the pre-2b artifact format (raw LGBMRegressor) for any
+        # checkpoint saved before per_card_stats was wired up.
+        if isinstance(payload, dict) and "model" in payload:
+            raw_stats = payload.get("per_card_stats") or {}
+            return cls(
+                model=payload["model"],
+                per_card_stats={
+                    card: (float(v[0]), float(v[1])) for card, v in raw_stats.items()
+                },
+            )
+        return cls(model=payload)

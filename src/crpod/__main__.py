@@ -11,13 +11,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 from pathlib import Path
 
 from crpod.dataset.huggingface import HFReplayLoader
-from crpod.modeling.ev import EvModel
+from crpod.modeling.ev import EvModel, compute_per_card_stats
 from crpod.pipeline import analyze_hf_replay, analyze_replay
 from crpod.types import Interaction
+
+_HOLDOUT_SEED = 0
+_HOLDOUT_FRACTION = 0.2
 
 
 def _training_target(interaction: Interaction) -> float | None:
@@ -162,34 +166,87 @@ def _cmd_train(args: argparse.Namespace) -> int:
         print("error: --max-replays must be > 0", file=sys.stderr)
         sys.exit(1)
     loader = HFReplayLoader(yolo_weights=args.weights)
-    rows: list[dict] = []
-    targets: list[float] = []
+    # Each entry is a per-replay bundle so we can split at the replay level
+    # and avoid adjacent-frame leakage across folds.
+    per_replay: list[tuple[list[dict], list[float], list[Interaction]]] = []
     seen = 0
     dropped = 0
     available = loader.list_replays(arena=args.arena)[: args.max_replays]
     for arena, replay_id in available:
         replay = loader.load(arena, replay_id)
         result = analyze_replay(replay)
+        rep_rows: list[dict] = []
+        rep_targets: list[float] = []
+        rep_interactions: list[Interaction] = []
         for interaction, row in zip(result.interactions, result.feature_rows, strict=True):
             seen += 1
             target = _training_target(interaction)
             if target is None:
                 dropped += 1
                 continue
-            rows.append(row)
-            targets.append(target)
+            rep_rows.append(row)
+            rep_targets.append(target)
+            rep_interactions.append(interaction)
+        if rep_rows:
+            per_replay.append((rep_rows, rep_targets, rep_interactions))
     if seen:
         pct = round(100 * dropped / seen)
         print(
             f"dropped {dropped}/{seen} training rows ({pct}% — unreadable HUD)",
             file=sys.stderr,
         )
-    if not rows:
+    if not per_replay:
         print("no training data collected", file=sys.stderr)
         return 1
-    print(f"training on {len(rows)} interactions from {len(available)} replays")
+
+    rng = random.Random(_HOLDOUT_SEED)
+    shuffled = list(per_replay)
+    rng.shuffle(shuffled)
+    n_replays = len(shuffled)
+    if n_replays >= 2:
+        split_idx = max(1, min(n_replays - 1, round(n_replays * (1 - _HOLDOUT_FRACTION))))
+    else:
+        split_idx = n_replays  # nothing to hold out — single replay
+    train_bundle = shuffled[:split_idx]
+    holdout_bundle = shuffled[split_idx:]
+
+    train_rows: list[dict] = []
+    train_targets: list[float] = []
+    train_interactions: list[Interaction] = []
+    for r, t, i in train_bundle:
+        train_rows.extend(r)
+        train_targets.extend(t)
+        train_interactions.extend(i)
+    holdout_rows: list[dict] = []
+    holdout_targets: list[float] = []
+    for r, t, _ in holdout_bundle:
+        holdout_rows.extend(r)
+        holdout_targets.extend(t)
+
+    print(
+        f"training on {len(train_rows)} interactions from {len(train_bundle)} replays "
+        f"(holdout {len(holdout_rows)} interactions from {len(holdout_bundle)} replays)"
+    )
     model = EvModel()
-    model.fit(rows, targets)
+    model.fit(train_rows, train_targets)
+    model.per_card_stats = compute_per_card_stats(train_interactions, train_targets)
+    print(f"per_card_stats: {len(model.per_card_stats)} cards with ≥5 train samples")
+
+    if holdout_rows:
+        from scipy.stats import spearmanr
+
+        preds = model.predict(holdout_rows)
+        mae = sum(abs(p - t) for p, t in zip(preds, holdout_targets, strict=True)) / len(
+            holdout_targets
+        )
+        spearman_result = spearmanr(preds, holdout_targets)
+        rho = float(spearman_result.statistic)
+        print(f"holdout MAE: {mae:.2f}")
+        print(f"holdout Spearman: {rho:.3f}")
+    else:
+        print("holdout MAE: n/a (single-replay training set)", file=sys.stderr)
+        print("holdout Spearman: n/a (single-replay training set)", file=sys.stderr)
+
     model.save(Path(args.out))
     print(f"saved model → {args.out}")
     return 0
