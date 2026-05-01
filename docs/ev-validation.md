@@ -39,26 +39,41 @@ never enters version control.
 
 ## Run results
 
-> **Status: structural deliverable only — metrics pending a real
-> training run.**
+> **Status: structural deliverable only — metrics blocked by a wave-2A
+> scoping miss in `src/crpod/dataset/huggingface.py`.**
 >
-> Two environment gaps blocked executing the run inside this worktree:
+> A real run was attempted on a brev A6000 instance (`hyperstack_A6000`,
+> Python 3.11 venv, `torch==2.11.0+cu126` against driver 570 / CUDA
+> 12.8). End-to-end command exited cleanly:
 >
-> 1. **`scikit-learn` is not in `pyproject.toml`.** LightGBM's
->    `LGBMRegressor` (sklearn API) raises `LightGBMError: scikit-learn
->    is required for lightgbm.sklearn` at fit time. `pyproject.toml` is
->    outside this chunk's owned files (per `CHUNK.md` ground rule 2),
->    so I'm surfacing rather than silently editing.
-> 2. **Local box has very low compute power.** Per `CLAUDE.md`, heavy
->    pipelines (YOLO inference on HF replay frames) should run on
->    `brev`. Even a `--max-replays 5` smoke run on macOS CPU is
->    untested and likely impractical.
+> ```text
+> dropped 768/768 training rows (100% — unreadable HUD)
+> no training data collected
+> ```
 >
-> The chunk's compute notes call out three lanes: (a) reduced
-> `--max-replays` smoke run, (b) brev for the full retrain, (c) stop
-> and surface. We're at lane (c) until the user picks (a) or (b).
-
-Once a run lands, fill in:
+> **Diagnosis.** `HFReplayLoader.load` returns `Replay(..., hud=[])`
+> at `src/crpod/dataset/huggingface.py:127`. Wave-2A's
+> `_training_target` (in `src/crpod/__main__.py`) requires
+> `interaction.tower_hp_delta` to be fully populated, which requires
+> `Interaction` windows built from a non-empty `Replay.hud`
+> (`crpod.features.interactions.build_interactions` reads HUD frames
+> at the window endpoints). With an empty `hud` list every interaction
+> hits the `None` branch in `_training_target` and gets dropped — 100%
+> of rows.
+>
+> **Why this didn't fail wave-2A's tests.** `tests/test_ev_target.py`
+> constructs `HudState`/`Interaction` instances synthetically in pure
+> Python (see the `_hud()` and `_interaction()` helpers), so the unit
+> tests exercise only the label arithmetic — they never hit the HF
+> loader. The gap is invisible until an end-to-end retrain.
+>
+> **Why this chunk can't fix it.** `src/crpod/dataset/*` is explicitly
+> out of scope for wave-2B per `CHUNK.md` ("Out of scope (do NOT
+> touch)"). Wiring `crpod.ocr.hud.HudReader` into `_parquet_to_replay`
+> belongs to a follow-up chunk (call it wave-2C "HUD-on-HF") or a
+> retroactive amendment to wave-2A.
+>
+> When that lands, fill in:
 
 | Metric                    | Value |
 | ------------------------- | ----- |
