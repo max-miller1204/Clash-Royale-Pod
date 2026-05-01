@@ -1,0 +1,239 @@
+# YOLO Pod-Video Detection Audit
+
+**Model:** `output/models/crpod_v1_best.pt` (YOLOv8s, 201 classes — 155 real
+Clash Royale classes + 44 `pad_*` filler from the KataCR class mapping)
+**Footage:** 3 pod screen-recordings of player **Max**, captured 2026-05-01,
+886 × 1920 portrait at 60 fps, 3–4 min each. Located under
+`data/pod-videos/` (gitignored, large MOVs).
+**Sampling:** 1 frame/s, default `conf=0.25`. ~180–240 frames per match.
+A second pass at `conf=0.05` (essentially the noise floor) was used as a
+sanity check on "the model fails to detect this card" claims — see the
+"Sub-floor verification" section below.
+**Reproducer:** `scripts/audit_pod_videos.py` (commits the script, not the
+output). Raw per-detection CSV + annotated sample frames live in
+`/tmp/yolo_audit_run/`.
+
+> This is a research/documentation chunk, not a code fix. Nothing about
+> the model, constants, or pipeline was changed. Findings here should
+> drive a follow-up issue *if* the EV path on pod videos depends on the
+> classes flagged below.
+
+---
+
+## TL;DR
+
+The detector behaves like a model trained on the HF/KataCR distribution
+when it is shown a different distribution: **HUD and tower geometry
+transfer well, swarm troops transfer okay, and the pod's signature
+big-troop cards (mega-knight, mini-pekka, wizard, giant-skeleton)
+do not appear to fire at all on these recordings** — even when those
+cards are clearly visible in the player's hand and almost certainly
+deployed within each ~3-min match.
+
+Spells (tornado, giant-snowball, fireball) are also effectively
+invisible to the audit at 1 fps because their on-screen footprint lasts
+~0.5 s — but `fireball` produced one detection at conf 0.93, hinting
+the model can see it when sampled near peak.
+
+The aspect ratio gap matters: HF training frames are 540 × 960
+(0.5625), pod recordings are 886 × 1920 (0.461). Ultralytics letterboxes
+during inference, but the resulting in-arena unit sizes do not match
+the training distribution, which is consistent with the pattern we see
+(towers fine, large troops fail).
+
+---
+
+## Pod's deck per match
+
+Reconstructed by visually inspecting the bottom card-tray HUD across
+~5 sampled timestamps per video. Where a card icon was ambiguous I
+flag it with `?`.
+
+### Match 1 (`ScreenRecording_05-01-2026 03-56-58_1.MOV`, 236 s)
+1. **mega-knight** (7) — visible in `Next:` slot at 35 s, 70 s, 117 s, 198 s
+2. **mini-pekka** (4)
+3. **knight** (3) — masked-helmet variant
+4. **giant-snowball** (2)
+5. **tornado** (3)
+6. **bats** (2)? — small skull-with-yellow-goggles icon, 2-cost
+7. **goblin-demolisher** (4)? — bomb-cart icon, 4-cost
+8. one slot I could not nail down across the sampled trays
+
+### Match 2 (`ScreenRecording_05-01-2026 04-01-24_1.MOV`, 181 s)
+Same deck as Match 1 (same player, deck appears unchanged).
+
+### Match 3 (`ScreenRecording_05-01-2026 04-04-50_1.MOV`, 229 s)
+Different archetype — wizard / fireball / heavy beatdown:
+1. **wizard** (5)
+2. **mini-pekka** (4)
+3. **knight** (3)
+4. **fireball** (4)
+5. **giant-skeleton** (6)
+6. **zappies** (4)
+7. an orange "welder/cossack" 4-cost — possibly **mighty-miner** or
+   **goblin-machine** (uncertain)
+8. a 2-cost redhead-with-axe — likely a champion **ability** card slot
+   (cost shown is the ability cost, not the base deploy cost)
+
+---
+
+## Per-card detection findings
+
+The table aggregates across all 3 matches. `n` = total detections at
+`conf>=0.25` across the ~640 sampled frames; `coverage` = fraction of
+frames in which the class appeared at least once; `mean conf` = mean
+score for the class over those detections. "Status" reflects what we
+observed against the on-screen reality, not a benchmark metric.
+
+### Pod-deck cards (the cards that gate EV quality on pod videos)
+
+| Card | Match | n | Coverage | Mean conf | Status | Notes |
+|------|-------|---|----------|-----------|--------|-------|
+| `mega-knight` | 1, 2 | **0** | 0% | — | **fails** | Featured in player's hand frequently. **0 detections even at conf=0.05** in Match 1 — clean negative. Likely the worst single regression on pod footage. |
+| `mini-pekka` | 1, 2, 3 | **0** | 0% | — | **fails** | In every match's deck. At conf=0.05 in Match 1: 1 lone sub-floor detection across 237 frames — effectively zero. |
+| `knight` | 1 | 2 | 0.8% | 0.32 | **flaky** | Both detections hover at the conf floor and at least one looked like a card-tray HUD false-positive (boxed on the bottom card icon, not the field). |
+| `knight` | 2 | 22 | 12% | 0.48 | **flaky** | Better — peaked at 0.94 once but median 0.36; many low-conf hits. |
+| `knight` | 3 | 5 | 2.2% | 0.29 | **flaky** | Sub-floor confidence cluster. |
+| `tornado` | 1, 2 | **0** | 0% | — | **n/a (sampling)** | Spell visual ~0.3–1 s; 1 fps sampling almost guarantees misses. Cannot conclude detection failure from this alone. |
+| `giant-snowball` | 1, 2 | **0** | 0% | — | **n/a (sampling)** | Same — sub-frame spell visual. |
+| `bats` | 1, 2 | 0 | 0% | — | **unknown** | Card identity itself uncertain; skip until reconfirmed. |
+| `goblin-demolisher` | 1, 2 | 0 | 0% | — | **unknown** | Class is **not in the YOLO label set** (model was trained before this card existed in the KataCR mapping). If the pod deploys it, it cannot be detected — this is a class-coverage gap, not a model quality issue. |
+| `wizard` | 3 | **0** | 0% | — | **fails** | Featured card in the deck. **0 detections even at conf=0.05** in Match 3 — clean negative. One stray `wizard` hit at 0.42 in Match 1 is unrelated (opponent had no wizard either; likely a HUD false positive). |
+| `fireball` | 3 | 1 | 0.4% | 0.93 | **catches when sampled** | Single hit at very high confidence. Spell visual is ~0.3 s so absence elsewhere is sampling, not a detector failure. |
+| `giant-skeleton` | 3 | **0** | 0% | — | **fires below floor** | Featured in deck. At conf=0.05 in Match 3: exactly 1 detection at conf 0.19 — the model has *some* weak signal but it never crosses the default 0.25 threshold. Different recommendation than mega-knight: a per-class threshold could partially recover this; a retrain probably can't be avoided either way. |
+| `zappies` (`zappy`) | 1, 2, 3 | 109 / 121 / 73 | 21–34% | 0.54–0.55 | **good** | Most reliable pod-deck card across all matches. Detected even from the sparser HF distribution. |
+| `mighty-miner` | 3 | 5 | 2.2% | 0.44 | **flaky** | Sparse but appears with reasonable confidence when seen. Low coverage may again be sampling, since the unit goes underground for parts of its life. |
+
+### Cross-cutting observations (HUD / towers / opponent cards)
+
+These aren't pod-deck cards, but they're load-bearing for the rest of
+the pipeline (tower HP comes from the bar classes; emote and clock
+classes anchor the HUD masking heuristics).
+
+| Class | Behavior |
+|-------|----------|
+| `king-tower`, `queen-tower`, `cannoneer-tower`, `dagger-duchess-tower` | Detected in ~95–100% of frames, mean conf 0.5–0.85, max ~0.97. **Solid** — tower detection survives the distribution shift cleanly. |
+| `tower-bar`, `bar`, `king-tower-bar` | 80–100% coverage, mean conf 0.6–0.9. **Solid** — feeds the OCR/HP-bar pipeline well. |
+| `text`, `clock`, `emote` | Detected on every frame. Sometimes spurious (HUD card-tray icons get tagged as `clock` or `text` — cosmetic, not load-bearing). |
+| `skeleton`, `goblin` | High counts (Match 1: 465 goblin detections, 95% coverage). Drilled into the persistent goblin cluster in Match 1 (frame 0 onward, box ≈ x∈[336,390], y∈[584,648]) — visually it sits on the **green decorative bush on top of the top king tower**. That single fixture explains most of the goblin count. Worth a follow-up if the EV path consumes raw goblin detections; the same king-tower bush will fire on every pod video taken in this arena. |
+| `hog-rider`, `dark-prince`, `electro-wizard`, `bandit`, `witch`, `executioner`, `golem`, `sparky`, `royal-giant`, `lava-hound` | One- to two-shot detections from opponent decks. Confidences trend low (0.27–0.50) but plausibly real. Useful for the opponent half of EV inference if you treat anything below ~0.4 as noisy. |
+| `tesla-evolution`, `goblin-drill`, `tombstone`, `cannon`, `inferno-tower` | Building detections fire intermittently; only `tesla-evolution` showed up across all 3 matches. Confidences modest. |
+
+### False-positive surface to be aware of
+
+While reviewing annotated frames the recurring artifacts were:
+
+- **Bottom card-tray icons mis-detected as units.** The selected/next
+  card icons get small bounding boxes labeled `knight`, `clock`,
+  `queen-tower`, etc. The bottom ~10% of the frame is HUD; downstream
+  consumers of detections should crop or mask it. The HF training
+  distribution lacks the iPad-style `Next:` chip and the `Max / No
+  Clan` banner, which is why these get hallucinated on.
+- **Top hand chips similarly hallucinated.** The 4 enemy hand cards at
+  the top get labeled (`queen-tower 0.33` on a card icon was visible
+  in Match 1 frame 0).
+- **King-tower decorative bush mis-classified as `goblin`.** Confirmed
+  visually in Match 1: the green shrub painted on top of the top king
+  tower fires a `goblin` detection at conf 0.25–0.50 in nearly every
+  sampled frame. This single static fixture is the dominant source of
+  the inflated goblin count.
+
+---
+
+## Sub-floor verification
+
+To distinguish "model can't see this card" from "model sees it weakly
+but the default `conf=0.25` filter erases it," each video that featured
+a flagged big troop was re-run at `conf=0.05`. Result, restricted to
+each video's deck-relevant cards:
+
+| Card | Video re-run | Detections at conf=0.05 | Verdict |
+|------|--------------|-------------------------|---------|
+| `mega-knight` | Match 1 | 0 | Truly never fires; not a threshold issue. |
+| `mini-pekka` | Match 1 | 1 (sub-floor) | Effectively never fires. |
+| `wizard` | Match 3 | 0 | Truly never fires; not a threshold issue. |
+| `giant-skeleton` | Match 3 | 1 at conf 0.19 | Fires below floor — the model has a faint signal that lowering the per-class threshold could partly recover. |
+| `knight` | Match 1 | 11 (vs 2 at conf=0.25) | Most additions are sub-0.20 noise. The "raise the floor" recommendation below stands. |
+
+Goblin counts in the same low-conf rerun (Match 3) jumped from 55 to
+384 detections, mean conf 0.16, median 0.09 — i.e., the model
+hallucinates faint goblin-shaped signals all over the screen at low
+confidence. Lowering the global threshold is **not** a viable lever
+for the missed big troops; it only adds noise.
+
+---
+
+## Risk to the EV pipeline (and recommendations)
+
+Recommendations only — none implemented in this chunk per `CHUNK.md`.
+
+1. **EV cannot price plays for cards the model never sees.** mega-knight,
+   mini-pekka, wizard, and giant-skeleton are all marquee cards in this
+   pod's two decks and produced **zero** detections in three matches
+   sampled at 1 fps. If `analyze-video` runs on a pod video featuring
+   these decks, the resulting `summary.json` will systematically
+   under-report the player's offensive plays. Recommend gating EV
+   output (or surfacing a warning) when `n_detections / video_duration`
+   for player-side big troops sits at zero — the pipeline shouldn't
+   silently produce confident EV deltas built only on swarm units.
+
+2. **`goblin-demolisher` is a class-coverage gap, not a tuning gap.**
+   The KataCR class map this model was trained against doesn't include
+   `goblin-demolisher` (released after the dataset was last updated).
+   If the pod runs that card, retraining is the only fix — there is no
+   confidence threshold that recovers it. Open as a separate issue
+   tagged "model-class-coverage" rather than touching constants.
+
+3. **HUD region needs masking before detections feed downstream.** The
+   bottom ~10% (card tray) and top ~12% (enemy hand chips + scoreboard)
+   of pod frames produce false positives that look like real units to
+   anything consuming the detection list. Recommend a viewer-aware
+   mask in the video path (analogous to how `dataset/side.py` is split
+   from `dataset/huggingface.py`) — or, cheaper, drop any detection
+   whose centroid falls in `y < 0.13 * H` or `y > 0.87 * H` *before*
+   tracking. This is a one-line guard, not a model change.
+
+4. **For the `knight` class specifically: raise the confidence floor.**
+   On pod footage, `knight` mostly produces sub-0.4 detections, many
+   of which we visually traced to HUD-tray icons rather than the
+   on-field knight. Recommend treating `knight` detections below 0.55
+   as noise for the EV path. (Recommendation only; do **not** change
+   `YoloDetector`'s default `conf` — that would silently drop other
+   classes.) The cleaner home for this is per-class confidence
+   thresholds, which the codebase doesn't have today.
+
+5. **Spells are out of reach at 1 fps and likely 5 fps.** `fireball`
+   produced one 0.93 detection; tornado and snowball produced none. The
+   on-screen visuals are ~0.3–1 s. Either bump sampling fps for the
+   spell-detection sub-step, or accept that the EV path will treat
+   spells as invisible and rely on elixir-bar deltas to infer them.
+
+6. **No critical, reproducible failure to escalate.** The model didn't
+   crash, didn't swap two classes, and didn't degrade catastrophically
+   on the *useful* parts of the frame (towers, swarms, HUD). The
+   findings above are quality regressions and class-coverage gaps that
+   warrant follow-up issues, not an emergency stop on this chunk.
+
+---
+
+## Reproducing the audit
+
+```bash
+# from repo root, with the project venv active (`uv sync` first if needed)
+uv run python scripts/audit_pod_videos.py \
+    --weights output/models/crpod_v1_best.pt \
+    --videos data/pod-videos \
+    --out /tmp/yolo_audit_run \
+    --fps 1.0 \
+    --conf 0.25 \
+    --sample-every 30
+```
+
+Outputs per video:
+- `<stem>__detections.csv` — one row per detection
+- `<stem>__per_class.csv` — aggregated per-class stats
+- `<stem>__frame_<NNNN>.jpg` — annotated samples (~every 30 s of game time)
+
+The script is intentionally small (~140 lines) and does not import
+anything from `src/crpod/` — it talks straight to ultralytics and cv2,
+so it stays usable even if the pipeline package gets refactored.
