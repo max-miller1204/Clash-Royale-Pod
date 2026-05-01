@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import logging
 
-from crpod.detection.cards import KATACR_TO_CARD, to_card_play
+from crpod.constants import CARD_COSTS
+from crpod.detection.cards import (
+    _KNOWN_UNCONFIRMED_CHAMPIONS,
+    KATACR_NON_CARD,
+    KATACR_TO_CARD,
+    to_card_play,
+)
 from crpod.detection.yolo import Detection
 from crpod.types import CardPlay, Side
 
@@ -48,9 +54,7 @@ class TestToCardPlay:
     def test_unknown_class_returns_none_and_warns_once(self, monkeypatch, caplog):
         # Ensure the class is not classified as either card or non-card.
         monkeypatch.setitem(KATACR_TO_CARD, "the-log", "log")  # unrelated entry
-        monkeypatch.setattr(
-            "crpod.detection.cards.KATACR_NON_CARD", frozenset()
-        )
+        monkeypatch.setattr("crpod.detection.cards.KATACR_NON_CARD", frozenset())
         # Reset the warn-once dedup set so the test is hermetic.
         monkeypatch.setattr("crpod.detection.cards._warned", set())
 
@@ -60,3 +64,21 @@ class TestToCardPlay:
 
         warnings = [r for r in caplog.records if "brand-new-class" in r.getMessage()]
         assert len(warnings) == 1, f"expected one warning, got {len(warnings)}"
+
+
+class TestMappingValidity:
+    def test_every_alias_target_has_known_cost_or_is_unconfirmed_champion(self):
+        """Each value in KATACR_TO_CARD must be a key in CARD_COSTS, OR one
+        of the 4 champions whose costs Supercell hasn't published yet."""
+        bad = []
+        for katacr_name, canonical in KATACR_TO_CARD.items():
+            if canonical in CARD_COSTS:
+                continue
+            if canonical in _KNOWN_UNCONFIRMED_CHAMPIONS:
+                continue
+            bad.append(f"{katacr_name!r} -> {canonical!r}")
+        assert not bad, "KATACR_TO_CARD has aliases pointing nowhere:\n  " + "\n  ".join(bad)
+
+    def test_no_overlap_between_card_and_non_card(self):
+        overlap = set(KATACR_TO_CARD.keys()) & KATACR_NON_CARD
+        assert not overlap, f"classes in both card and non-card sets: {overlap}"
