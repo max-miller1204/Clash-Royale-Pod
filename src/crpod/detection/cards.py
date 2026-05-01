@@ -23,22 +23,29 @@ from crpod.types import CardPlay, Side
 _log = logging.getLogger(__name__)
 _warned: set[str] = set()
 
-# Champions whose costs Supercell hasn't published yet. They may appear
-# as values in KATACR_TO_CARD without a matching CARD_COSTS row.
-_KNOWN_UNCONFIRMED_CHAMPIONS: Final[frozenset[str]] = frozenset(
+# Cards whose elixir cost Supercell hasn't published yet (or has a special
+# variable cost, in the case of mirror). They may appear as values in
+# KATACR_TO_CARD without a matching CARD_COSTS row; the validity test
+# allows this. ``card_cost()`` falls back to ``default=3`` for them.
+_KNOWN_UNCONFIRMED_COSTS: Final[frozenset[str]] = frozenset(
     {
+        # Champions whose costs aren't published yet
         "boss_bandit",
         "rune_giant",
         "spirit_empress",
         "terry",
+        # Recently-released cards needing source verification
+        "goblin_brawler",
+        "royal_guardian",
+        # Variable-cost card (mirror = cost of last card played)
+        "mirror",
     }
 )
 
-# KataCR class name -> canonical CARD_COSTS key. The full mapping is
-# populated against ``katacr_classes.txt`` in Phase 2; the entries below
-# are the irregular cases documented by KataCR's public dataset:
-# singular -> plural for spawn-individual labels, multi-state classes
-# collapsed to a single base card, and known punctuation/`the-` quirks.
+# KataCR class name -> canonical CARD_COSTS key. Generated against
+# ``katacr_classes.txt`` (derived from upstream KataCR's public
+# ClashRoyale_detection.yaml). Covers all 151 real classes; the 50
+# pad_* placeholders go in KATACR_NON_CARD.
 KATACR_TO_CARD: dict[str, str] = {
     # the- prefix
     "the-log": "log",
@@ -68,11 +75,199 @@ KATACR_TO_CARD: dict[str, str] = {
     "rascal-girl": "rascals",
     # Punctuation differences
     "x-bow": "xbow",
+    # Evolution variants -> base card (evolutions share the base cost)
+    "archer-evolution": "archers",
+    "barbarian-evolution": "barbarians",
+    "bat-evolution": "bats",
+    "bomber-evolution": "bomber",
+    "firecracker-evolution": "firecracker",
+    "ice-spirit-evolution": "ice_spirit",
+    "knight-evolution": "knight",
+    "mortar-evolution": "mortar",
+    "royal-giant-evolution": "royal_giant",
+    "royal-recruit-evolution": "royal_recruits",
+    "skeleton-evolution": "skeletons",
+    "tesla-evolution": "tesla",
+    "valkyrie-evolution": "valkyrie",
+    "wall-breaker-evolution": "wall_breakers",
+    # Cards needing cost source verification (see _KNOWN_UNCONFIRMED_COSTS)
+    "mirror": "mirror",
+    "goblin-brawler": "goblin_brawler",
+    "royal-guardian": "royal_guardian",
+    # Standard cards (kebab-case in KataCR -> underscore in CARD_COSTS)
+    "archer-queen": "archer_queen",
+    "arrows": "arrows",
+    "baby-dragon": "baby_dragon",
+    "balloon": "balloon",
+    "bandit": "bandit",
+    "barbarian-barrel": "barbarian_barrel",
+    "barbarian-hut": "barbarian_hut",
+    "battle-healer": "battle_healer",
+    "battle-ram": "battle_ram",
+    "bomb-tower": "bomb_tower",
+    "bomber": "bomber",
+    "bowler": "bowler",
+    "cannon": "cannon",
+    "cannon-cart": "cannon_cart",
+    "clone": "clone",
+    "dark-prince": "dark_prince",
+    "dart-goblin": "dart_goblin",
+    "earthquake": "earthquake",
+    "electro-dragon": "electro_dragon",
+    "electro-giant": "electro_giant",
+    "electro-spirit": "electro_spirit",
+    "electro-wizard": "electro_wizard",
+    "elixir-collector": "elixir_collector",
+    "executioner": "executioner",
+    "fire-spirit": "fire_spirit",
+    "fireball": "fireball",
+    "firecracker": "firecracker",
+    "fisherman": "fisherman",
+    "flying-machine": "flying_machine",
+    "freeze": "freeze",
+    "furnace": "furnace",
+    "giant": "giant",
+    "giant-skeleton": "giant_skeleton",
+    "giant-snowball": "giant_snowball",
+    "goblin-barrel": "goblin_barrel",
+    "goblin-cage": "goblin_cage",
+    "goblin-drill": "goblin_drill",
+    "goblin-giant": "goblin_giant",
+    "goblin-hut": "goblin_hut",
+    "golden-knight": "golden_knight",
+    "golem": "golem",
+    "graveyard": "graveyard",
+    "heal-spirit": "heal_spirit",
+    "hog-rider": "hog_rider",
+    "hunter": "hunter",
+    "ice-golem": "ice_golem",
+    "ice-spirit": "ice_spirit",
+    "ice-wizard": "ice_wizard",
+    "inferno-dragon": "inferno_dragon",
+    "inferno-tower": "inferno_tower",
+    "knight": "knight",
+    "lava-hound": "lava_hound",
+    "lightning": "lightning",
+    "little-prince": "little_prince",
+    "lumberjack": "lumberjack",
+    "magic-archer": "magic_archer",
+    "mega-knight": "mega_knight",
+    "mega-minion": "mega_minion",
+    "mighty-miner": "mighty_miner",
+    "miner": "miner",
+    "mini-pekka": "mini_pekka",
+    "monk": "monk",
+    "mortar": "mortar",
+    "mother-witch": "mother_witch",
+    "musketeer": "musketeer",
+    "night-witch": "night_witch",
+    "pekka": "pekka",
+    "poison": "poison",
+    "prince": "prince",
+    "princess": "princess",
+    "rage": "rage",
+    "ram-rider": "ram_rider",
+    "rocket": "rocket",
+    "royal-delivery": "royal_delivery",
+    "royal-ghost": "royal_ghost",
+    "royal-giant": "royal_giant",
+    "skeleton-barrel": "skeleton_barrel",
+    "skeleton-king": "skeleton_king",
+    "sparky": "sparky",
+    "tesla": "tesla",
+    "tombstone": "tombstone",
+    "tornado": "tornado",
+    "valkyrie": "valkyrie",
+    "witch": "witch",
+    "wizard": "wizard",
+    "zap": "zap",
 }
 
-# KataCR class names that are not card placements (towers, HP bars,
-# projectiles, UI elements). Populated in Task 9.
-KATACR_NON_CARD: frozenset[str] = frozenset()
+# KataCR class names that are not card placements: towers, HP bars,
+# UI elements, projectiles, mid-fight spawn-derived units (a `goblin`
+# from a goblin-barrel is the unit, not a fresh card play), and the
+# `pad_*` placeholders KataCR included in their yaml for class-id
+# alignment.
+KATACR_NON_CARD: frozenset[str] = frozenset(
+    {
+        # HUD / cosmetic / UI
+        "axe",
+        "bar",
+        "bar-level",
+        "bomb",
+        "cannoneer-tower",
+        "clock",
+        "dirt",
+        "elixir",
+        "emote",
+        "evolution-symbol",
+        "goblin-ball",
+        "golemite",
+        "hog",
+        "ice-spirit-evolution-symbol",
+        "king-tower",
+        "king-tower-bar",
+        "lava-pup",
+        "queen-tower",
+        "selected",
+        "skeleton-king-bar",
+        "skeleton-king-skill",
+        "tesla-evolution-shock",
+        "text",
+        "tower-bar",
+        # Padding placeholders (no training examples)
+        "pad_0",
+        "pad_1",
+        "pad_2",
+        "pad_3",
+        "pad_4",
+        "pad_5",
+        "pad_6",
+        "pad_7",
+        "pad_8",
+        "pad_9",
+        "pad_10",
+        "pad_11",
+        "pad_12",
+        "pad_13",
+        "pad_14",
+        "pad_15",
+        "pad_16",
+        "pad_17",
+        "pad_18",
+        "pad_19",
+        "pad_20",
+        "pad_21",
+        "pad_22",
+        "pad_23",
+        "pad_24",
+        "pad_25",
+        "pad_26",
+        "pad_27",
+        "pad_28",
+        "pad_29",
+        "pad_30",
+        "pad_31",
+        "pad_32",
+        "pad_33",
+        "pad_34",
+        "pad_35",
+        "pad_36",
+        "pad_37",
+        "pad_38",
+        "pad_39",
+        "pad_40",
+        "pad_41",
+        "pad_42",
+        "pad_43",
+        "pad_44",
+        "pad_45",
+        "pad_46",
+        "pad_47",
+        "pad_48",
+        "pad_belong",
+    }
+)
 
 
 def _infer_side(y: int) -> Side:

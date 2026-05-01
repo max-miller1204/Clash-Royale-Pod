@@ -9,7 +9,7 @@ import pytest
 
 from crpod.constants import CARD_COSTS
 from crpod.detection.cards import (
-    _KNOWN_UNCONFIRMED_CHAMPIONS,
+    _KNOWN_UNCONFIRMED_COSTS,
     KATACR_NON_CARD,
     KATACR_TO_CARD,
     to_card_play,
@@ -92,7 +92,7 @@ class TestMappingValidity:
         for katacr_name, canonical in KATACR_TO_CARD.items():
             if canonical in CARD_COSTS:
                 continue
-            if canonical in _KNOWN_UNCONFIRMED_CHAMPIONS:
+            if canonical in _KNOWN_UNCONFIRMED_COSTS:
                 continue
             bad.append(f"{katacr_name!r} -> {canonical!r}")
         assert not bad, "KATACR_TO_CARD has aliases pointing nowhere:\n  " + "\n  ".join(bad)
