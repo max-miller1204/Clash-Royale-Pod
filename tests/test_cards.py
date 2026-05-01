@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+
+import pytest
 
 from crpod.constants import CARD_COSTS
 from crpod.detection.cards import (
@@ -24,6 +27,21 @@ def _det(cls: str, *, frame: int = 42, cx: float = 240.0, cy: float = 600.0) -> 
         confidence=0.9,
         xyxy=(cx - half, cy - half, cx + half, cy + half),
     )
+
+
+KATACR_CLASSES_FILE = (
+    Path(__file__).parent.parent / "src" / "crpod" / "detection" / "katacr_classes.txt"
+)
+
+
+def _load_snapshot() -> list[str]:
+    if not KATACR_CLASSES_FILE.exists():
+        pytest.skip(
+            f"{KATACR_CLASSES_FILE} not present — run "
+            "scripts/dump_katacr_classes.py on a machine with the "
+            "trained weights to generate it."
+        )
+    return [line.strip() for line in KATACR_CLASSES_FILE.read_text().splitlines() if line.strip()]
 
 
 class TestToCardPlay:
@@ -82,3 +100,23 @@ class TestMappingValidity:
     def test_no_overlap_between_card_and_non_card(self):
         overlap = set(KATACR_TO_CARD.keys()) & KATACR_NON_CARD
         assert not overlap, f"classes in both card and non-card sets: {overlap}"
+
+
+class TestSnapshotCoverage:
+    def test_every_snapshot_class_is_mapped(self):
+        classes = set(_load_snapshot())
+        classified = set(KATACR_TO_CARD.keys()) | KATACR_NON_CARD
+        unclassified = classes - classified
+        assert not unclassified, (
+            "snapshot has classes not in KATACR_TO_CARD or KATACR_NON_CARD:\n  "
+            + "\n  ".join(sorted(unclassified))
+        )
+
+    def test_no_mapping_entry_for_class_outside_snapshot(self):
+        classes = set(_load_snapshot())
+        classified = set(KATACR_TO_CARD.keys()) | KATACR_NON_CARD
+        stale = classified - classes
+        assert not stale, (
+            "mapping has entries not in the snapshot (stale or typo):\n  "
+            + "\n  ".join(sorted(stale))
+        )
