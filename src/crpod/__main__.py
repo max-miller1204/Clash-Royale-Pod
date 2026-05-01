@@ -232,6 +232,23 @@ def _cmd_train(args: argparse.Namespace) -> int:
     model.per_card_stats = compute_per_card_stats(train_interactions, train_targets)
     print(f"per_card_stats: {len(model.per_card_stats)} cards with ≥5 train samples")
 
+    # Top-10 anchor cards by training-fold sample count (for docs/ev-validation.md).
+    counts: dict[str, int] = {}
+    for interaction in train_interactions:
+        if not interaction.friendly_plays:
+            continue
+        counts[interaction.friendly_plays[0].card] = (
+            counts.get(interaction.friendly_plays[0].card, 0) + 1
+        )
+    top = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:10]
+    print("top-10 anchor cards by train-fold n_samples:")
+    for card, n in top:
+        if card in model.per_card_stats:
+            median, std = model.per_card_stats[card]
+            print(f"  {card}: n={n} median={median:+.1f} std={std:.1f}")
+        else:
+            print(f"  {card}: n={n} (excluded — <5 samples)")
+
     if holdout_rows:
         from scipy.stats import spearmanr
 
