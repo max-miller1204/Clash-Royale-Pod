@@ -120,8 +120,6 @@ class EvModel:
             raw_stats = payload.get("per_card_stats") or {}
             return cls(
                 model=payload["model"],
-                per_card_stats={
-                    card: (float(v[0]), float(v[1])) for card, v in raw_stats.items()
-                },
+                per_card_stats={card: (float(v[0]), float(v[1])) for card, v in raw_stats.items()},
             )
         return cls(model=payload)
