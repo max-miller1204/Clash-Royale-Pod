@@ -34,8 +34,41 @@ _KNOWN_UNCONFIRMED_CHAMPIONS: Final[frozenset[str]] = frozenset(
     }
 )
 
-# KataCR class name -> canonical CARD_COSTS key. Populated in Task 9.
-KATACR_TO_CARD: dict[str, str] = {}
+# KataCR class name -> canonical CARD_COSTS key. The full mapping is
+# populated against ``katacr_classes.txt`` in Phase 2; the entries below
+# are the irregular cases documented by KataCR's public dataset:
+# singular -> plural for spawn-individual labels, multi-state classes
+# collapsed to a single base card, and known punctuation/`the-` quirks.
+KATACR_TO_CARD: dict[str, str] = {
+    # the- prefix
+    "the-log": "log",
+    # Singular -> plural (KataCR labels each unit individually)
+    "skeleton": "skeletons",
+    "goblin": "goblins",
+    "spear-goblin": "spear_goblins",
+    "bat": "bats",
+    "barbarian": "barbarians",
+    "wall-breaker": "wall_breakers",
+    "archer": "archers",
+    "minion": "minions",
+    "royal-recruit": "royal_recruits",
+    "guard": "guards",
+    "skeleton-dragon": "skeleton_dragons",
+    "zappy": "zappies",
+    "elite-barbarian": "elite_barbarians",
+    "royal-hog": "royal_hogs",
+    # Multi-state classes -> single base card
+    "elixir-golem-big": "elixir_golem",
+    "elixir-golem-mid": "elixir_golem",
+    "elixir-golem-small": "elixir_golem",
+    "phoenix-big": "phoenix",
+    "phoenix-egg": "phoenix",
+    "phoenix-small": "phoenix",
+    "rascal-boy": "rascals",
+    "rascal-girl": "rascals",
+    # Punctuation differences
+    "x-bow": "xbow",
+}
 
 # KataCR class names that are not card placements (towers, HP bars,
 # projectiles, UI elements). Populated in Task 9.
