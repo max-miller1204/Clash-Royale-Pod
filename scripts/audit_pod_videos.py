@@ -67,8 +67,16 @@ def _draw(
         color = (0, 255, 0) if conf >= 0.5 else (0, 165, 255)
         cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
         label = f"{cls} {conf:.2f}"
-        cv2.putText(img, label, (int(x1), max(int(y1) - 5, 12)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+        cv2.putText(
+            img,
+            label,
+            (int(x1), max(int(y1) - 5, 12)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            color,
+            1,
+            cv2.LINE_AA,
+        )
     return img
 
 
@@ -110,10 +118,17 @@ def audit(
                     cls = str(names[cls_id])
                     c = float(box.conf.item())
                     x1, y1, x2, y2 = (float(v) for v in box.xyxy[0].tolist())
-                    w.writerow([
-                        fidx, cls, f"{c:.4f}",
-                        f"{x1:.1f}", f"{y1:.1f}", f"{x2:.1f}", f"{y2:.1f}",
-                    ])
+                    w.writerow(
+                        [
+                            fidx,
+                            cls,
+                            f"{c:.4f}",
+                            f"{x1:.1f}",
+                            f"{y1:.1f}",
+                            f"{x2:.1f}",
+                            f"{y2:.1f}",
+                        ]
+                    )
                     per_class_confs[cls].append(c)
                     per_class_frames[cls].add(fidx)
                     boxes_for_draw.append((cls, c, (x1, y1, x2, y2)))
@@ -124,10 +139,18 @@ def audit(
 
     with cls_csv.open("w", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow([
-            "cls", "n_detections", "n_frames", "frame_coverage_pct",
-            "mean_conf", "median_conf", "max_conf", "is_pad",
-        ])
+        w.writerow(
+            [
+                "cls",
+                "n_detections",
+                "n_frames",
+                "frame_coverage_pct",
+                "mean_conf",
+                "median_conf",
+                "max_conf",
+                "is_pad",
+            ]
+        )
         rows = []
         for cls, confs in per_class_confs.items():
             n = len(confs)
@@ -138,14 +161,21 @@ def audit(
             max_c = float(np.max(confs))
             is_pad = cls.startswith(PAD_PREFIX)
             rows.append((cls, n, nf, cov, mean_c, median_c, max_c, is_pad))
-        rows.sort(key=lambda r: (-r[1]))
+        rows.sort(key=lambda r: -r[1])
         for r in rows:
             cls, n, nf, cov, mn, md, mx, ispad = r
-            w.writerow([
-                cls, n, nf,
-                f"{cov:.1f}", f"{mn:.3f}", f"{md:.3f}", f"{mx:.3f}",
-                "1" if ispad else "0",
-            ])
+            w.writerow(
+                [
+                    cls,
+                    n,
+                    nf,
+                    f"{cov:.1f}",
+                    f"{mn:.3f}",
+                    f"{md:.3f}",
+                    f"{mx:.3f}",
+                    "1" if ispad else "0",
+                ]
+            )
 
     print(f"[{video.name}] wrote {det_csv.name}, {cls_csv.name}")
     print(f"[{video.name}] top 15 classes by detection count:")
@@ -166,7 +196,9 @@ def main() -> None:
     ap.add_argument("--fps", type=float, default=1.0)
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument(
-        "--sample-every", type=int, default=20,
+        "--sample-every",
+        type=int,
+        default=20,
         help="save an annotated frame every Nth sampled frame (1 fps default => every 20s)",
     )
     ap.add_argument("--glob", default="*.MOV")

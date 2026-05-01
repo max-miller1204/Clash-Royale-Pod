@@ -223,9 +223,7 @@ def main() -> None:
         replays = [(a, r) for a, r in args.replay]
     else:
         arenas = args.arena or [a for a, _ in DEFAULT_REPLAYS]
-        replays = [
-            (a, r) for a in arenas for r in _list_first_replays(a, n=args.per_arena)
-        ]
+        replays = [(a, r) for a in arenas for r in _list_first_replays(a, n=args.per_arena)]
 
     detector = YoloDetector(args.weights, conf=args.conf)
     print(f"validating side inference on {len(replays)} replays")
