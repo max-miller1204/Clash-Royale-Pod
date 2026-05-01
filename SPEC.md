@@ -157,3 +157,5 @@ Fork remote: origin
 Upstream remote: origin
 
 _Wave 1 executed 2026-05-01 on branch swarm/finish-project-wave-1; chunks 1a-side-inference, 1b-champion-costs, 1c-yolo-pod-audit; PR https://github.com/max-miller1204/Clash-Royale-Pod/pull/24_
+
+_Wave 2 executed 2026-05-01 on branch swarm/finish-project-wave-2; chunks 2a-ev-label, 2b-retrain-validate; PR https://github.com/max-miller1204/Clash-Royale-Pod/pull/26_

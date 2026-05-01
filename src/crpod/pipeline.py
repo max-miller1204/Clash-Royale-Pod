@@ -98,7 +98,7 @@ class AnalysisResult:
 
 
 def analyze_replay(replay: Replay, model: EvModel | None = None) -> AnalysisResult:
-    interactions = build_interactions(replay.plays)
+    interactions = build_interactions(replay.plays, hud=replay.hud)
     rows = [interaction_features(i) for i in interactions]
     predictions = model.predict(rows) if (model and rows) else None
     return AnalysisResult(

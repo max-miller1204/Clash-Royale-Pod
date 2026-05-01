@@ -11,12 +11,33 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 from pathlib import Path
 
 from crpod.dataset.huggingface import HFReplayLoader
-from crpod.modeling.ev import EvModel
+from crpod.modeling.ev import EvModel, compute_per_card_stats
 from crpod.pipeline import analyze_hf_replay, analyze_replay
+from crpod.types import Interaction
+
+_HOLDOUT_SEED = 0
+_HOLDOUT_FRACTION = 0.2
+
+
+def _training_target(interaction: Interaction) -> float | None:
+    """Princess-tower HP-delta EV target for one interaction.
+
+    Returns `None` when any of the four princess deltas is unreadable so
+    callers can drop the row.
+    """
+    delta = interaction.tower_hp_delta
+    fl = delta.get("friendly_left")
+    fr = delta.get("friendly_right")
+    el = delta.get("enemy_left")
+    er = delta.get("enemy_right")
+    if fl is None or fr is None or el is None or er is None:
+        return None
+    return float((fl + fr) - (el + er))
 
 
 def _positive_float(value: str) -> float:
@@ -145,21 +166,104 @@ def _cmd_train(args: argparse.Namespace) -> int:
         print("error: --max-replays must be > 0", file=sys.stderr)
         sys.exit(1)
     loader = HFReplayLoader(yolo_weights=args.weights)
-    rows: list[dict] = []
-    targets: list[float] = []
+    # Each entry is a per-replay bundle so we can split at the replay level
+    # and avoid adjacent-frame leakage across folds.
+    per_replay: list[tuple[list[dict], list[float], list[Interaction]]] = []
+    seen = 0
+    dropped = 0
     available = loader.list_replays(arena=args.arena)[: args.max_replays]
     for arena, replay_id in available:
         replay = loader.load(arena, replay_id)
         result = analyze_replay(replay)
+        rep_rows: list[dict] = []
+        rep_targets: list[float] = []
+        rep_interactions: list[Interaction] = []
         for interaction, row in zip(result.interactions, result.feature_rows, strict=True):
-            rows.append(row)
-            targets.append(float(interaction.elixir_trade))
-    if not rows:
+            seen += 1
+            target = _training_target(interaction)
+            if target is None:
+                dropped += 1
+                continue
+            rep_rows.append(row)
+            rep_targets.append(target)
+            rep_interactions.append(interaction)
+        if rep_rows:
+            per_replay.append((rep_rows, rep_targets, rep_interactions))
+    if seen:
+        pct = round(100 * dropped / seen)
+        print(
+            f"dropped {dropped}/{seen} training rows ({pct}% — unreadable HUD)",
+            file=sys.stderr,
+        )
+    if not per_replay:
         print("no training data collected", file=sys.stderr)
         return 1
-    print(f"training on {len(rows)} interactions from {len(available)} replays")
+
+    rng = random.Random(_HOLDOUT_SEED)
+    shuffled = list(per_replay)
+    rng.shuffle(shuffled)
+    n_replays = len(shuffled)
+    if n_replays >= 2:
+        split_idx = max(1, min(n_replays - 1, round(n_replays * (1 - _HOLDOUT_FRACTION))))
+    else:
+        split_idx = n_replays  # nothing to hold out — single replay
+    train_bundle = shuffled[:split_idx]
+    holdout_bundle = shuffled[split_idx:]
+
+    train_rows: list[dict] = []
+    train_targets: list[float] = []
+    train_interactions: list[Interaction] = []
+    for r, t, i in train_bundle:
+        train_rows.extend(r)
+        train_targets.extend(t)
+        train_interactions.extend(i)
+    holdout_rows: list[dict] = []
+    holdout_targets: list[float] = []
+    for r, t, _ in holdout_bundle:
+        holdout_rows.extend(r)
+        holdout_targets.extend(t)
+
+    print(
+        f"training on {len(train_rows)} interactions from {len(train_bundle)} replays "
+        f"(holdout {len(holdout_rows)} interactions from {len(holdout_bundle)} replays)"
+    )
     model = EvModel()
-    model.fit(rows, targets)
+    model.fit(train_rows, train_targets)
+    model.per_card_stats = compute_per_card_stats(train_interactions, train_targets)
+    print(f"per_card_stats: {len(model.per_card_stats)} cards with ≥5 train samples")
+
+    # Top-10 anchor cards by training-fold sample count (for docs/ev-validation.md).
+    counts: dict[str, int] = {}
+    for interaction in train_interactions:
+        if not interaction.friendly_plays:
+            continue
+        counts[interaction.friendly_plays[0].card] = (
+            counts.get(interaction.friendly_plays[0].card, 0) + 1
+        )
+    top = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:10]
+    print("top-10 anchor cards by train-fold n_samples:")
+    for card, n in top:
+        if card in model.per_card_stats:
+            median, std = model.per_card_stats[card]
+            print(f"  {card}: n={n} median={median:+.1f} std={std:.1f}")
+        else:
+            print(f"  {card}: n={n} (excluded — <5 samples)")
+
+    if holdout_rows:
+        from scipy.stats import spearmanr
+
+        preds = model.predict(holdout_rows)
+        mae = sum(abs(p - t) for p, t in zip(preds, holdout_targets, strict=True)) / len(
+            holdout_targets
+        )
+        spearman_result = spearmanr(preds, holdout_targets)
+        rho = float(spearman_result.statistic)
+        print(f"holdout MAE: {mae:.2f}")
+        print(f"holdout Spearman: {rho:.3f}")
+    else:
+        print("holdout MAE: n/a (single-replay training set)", file=sys.stderr)
+        print("holdout Spearman: n/a (single-replay training set)", file=sys.stderr)
+
     model.save(Path(args.out))
     print(f"saved model → {args.out}")
     return 0

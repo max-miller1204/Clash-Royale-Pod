@@ -15,6 +15,9 @@ output/
 # Third-party data clones (large, not ours to version)
 Clash-Royale-Detection-Dataset/
 
+# Pod-local match videos / data caches (large, not versioned)
+data/
+
 # YOLO weights (large binaries — store in output/models/)
 *.pt
 
