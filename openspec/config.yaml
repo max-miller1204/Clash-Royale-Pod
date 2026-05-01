@@ -50,8 +50,8 @@ rules:
     - Use Given/When/Then scenarios. For pipeline stages, prefer scenarios shaped
       around inputs (frame batches, parquet rows) and outputs (CardPlay, HudState,
       AnalysisResult) rather than implementation steps.
-    - Organize specs by domain mirroring the source tree where it makes sense:
-      `detection/`, `tracking/`, `ocr/`, `modeling/`, `pipeline/`, `cli/`.
+    - "Organize specs by domain mirroring the source tree where it makes sense:
+      `detection/`, `tracking/`, `ocr/`, `modeling/`, `pipeline/`, `cli/`."
     - Use SHALL/MUST for hard contracts (CLI output schema, public function
       signatures); use SHOULD for performance/quality targets.
 

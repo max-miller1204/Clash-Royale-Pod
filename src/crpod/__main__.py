@@ -35,7 +35,11 @@ def _cmd_list(args: argparse.Namespace) -> int:
 
 def _cmd_analyze(args: argparse.Namespace) -> int:
     if not args.weights.exists():
-        sys.exit(f"weights file not found: {args.weights}")
+        print(f"error: weights file not found: {args.weights}", file=sys.stderr)
+        sys.exit(1)
+    if args.model is not None and not args.model.exists():
+        print(f"error: EV model file not found: {args.model}", file=sys.stderr)
+        sys.exit(1)
     model = EvModel.load(args.model) if args.model else None
     result = analyze_hf_replay(args.arena, args.replay_id, yolo_weights=args.weights, model=model)
     out = Path(args.out)
@@ -132,7 +136,14 @@ def _cmd_analyze_video(args: argparse.Namespace) -> int:
 
 def _cmd_train(args: argparse.Namespace) -> int:
     if not args.weights.exists():
-        sys.exit(f"weights file not found: {args.weights}")
+        print(f"error: weights file not found: {args.weights}", file=sys.stderr)
+        sys.exit(1)
+    if not args.out.parent.exists():
+        print(f"error: output directory does not exist: {args.out.parent}", file=sys.stderr)
+        sys.exit(1)
+    if args.max_replays <= 0:
+        print("error: --max-replays must be > 0", file=sys.stderr)
+        sys.exit(1)
     loader = HFReplayLoader(yolo_weights=args.weights)
     rows: list[dict] = []
     targets: list[float] = []
