@@ -1,0 +1,77 @@
+schema: spec-driven
+
+context: |
+  Project: Clash Royale Post-Game Analyzer (crpod) — CV + statistical pipeline that
+  ingests gameplay video, detects card plays + HUD state, and produces analysis
+  artifacts (summary.json, blunders.json, report.html).
+
+  Runtime: Python 3.11 only. Dependencies managed by uv (`uv sync --frozen`).
+  The project lives behind a Nix flake — every dev/CI command runs inside
+  `nix develop` because system deps (ffmpeg, tesseract, libGL, etc.) come from
+  nixpkgs, not pip. Local compute is intentionally weak; heavy CPU/GPU work
+  (training, batch inference, dataset preparation) runs on Brev.
+
+  CV/ML stack: ultralytics YOLO for detection, supervision (ByteTrack) for
+  tracking, pytesseract for HUD OCR, torch + lightgbm for modeling, pandas +
+  pyarrow + datasets for data wrangling. Pipeline shape:
+  `VideoFrameIterator → YoloDetector → Tracker → HudReader → CardPlay/HudState
+  stream → analyze_replay`.
+
+  Source layout (`src/crpod/`): `detection/`, `tracking/`, `ocr/`, `dataset/`,
+  `features/`, `modeling/`, `visualization/`, plus `pipeline.py`, `types.py`,
+  `constants.py`, `__main__.py` (CLI: `crpod analyze`, `crpod analyze-video`).
+
+  Tests in `tests/` use pytest; lint is ruff (check + format); types are mypy
+  on `src/`. Snapshot/fixture data lives in `tests/fixtures/`.
+
+  Conventions:
+  - Run commands as `nix develop --command uv run …` (locally and in CI).
+  - Branch naming follows `swarm/{slug}-wave-{n}` for parallel work; `chore/`,
+    `fix/`, `feat/` for everything else.
+  - Code style: snake_case functions/vars, kebab-case branches/CLI flags.
+  - Prefer no comments; only add comments when WHY is non-obvious.
+  - Boundary types live in `src/crpod/types.py` — extend there before inventing.
+
+rules:
+  proposal:
+    - State which existing modules under `src/crpod/` this change touches and why.
+      This is a brownfield codebase — almost every change is a modification, not
+      a greenfield addition.
+    - Call out compute requirements explicitly. If anything in this change must
+      run on Brev (training, full-dataset eval, large batched inference), say so
+      under Scope.
+    - Identify whether this change requires new fixture data in `tests/fixtures/`
+      or new HuggingFace dataset reads — these are expensive to set up, worth
+      flagging upfront.
+
+  specs:
+    - Specs are behavior contracts. Do not name internal classes, functions, or
+      file paths in requirements/scenarios. Those belong in `design.md`.
+    - Use Given/When/Then scenarios. For pipeline stages, prefer scenarios shaped
+      around inputs (frame batches, parquet rows) and outputs (CardPlay, HudState,
+      AnalysisResult) rather than implementation steps.
+    - Organize specs by domain mirroring the source tree where it makes sense:
+      `detection/`, `tracking/`, `ocr/`, `modeling/`, `pipeline/`, `cli/`.
+    - Use SHALL/MUST for hard contracts (CLI output schema, public function
+      signatures); use SHOULD for performance/quality targets.
+
+  design:
+    - Reference existing patterns in `src/crpod/` before inventing new structure.
+      Especially: how `pipeline.py` composes stages, how `types.py` declares
+      boundary types, how `detection/cards.py` handles per-frame mapping.
+    - Declare data shapes precisely. For numpy: dtype + axis semantics. For
+      pandas/parquet: column names + dtypes. For HuggingFace datasets: which
+      fields are read.
+    - If the change adds a new pipeline stage, document the interface contract
+      (input type, output type, side effects) the same way existing stages do.
+    - Note any new system deps that need to land in `flake.nix` (rare — most
+      additions are pure Python and go in `pyproject.toml`).
+
+  tasks:
+    - Group tasks by file or module. A task should change one logical unit.
+    - Mark Brev-required tasks explicitly (e.g. "[Brev] Train …" or "[Brev] Run
+      full-dataset eval"). Do not silently assume local compute can handle them.
+    - Include a verification task per logical unit: pytest for code, snapshot
+      check for mappings, smoke run for CLI behavior.
+    - Keep scope tight — if you find yourself writing a refactor task next to a
+      feature task, that's a signal to split into two changes.
