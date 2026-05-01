@@ -55,13 +55,9 @@ flag it with `?`.
 3. **knight** (3) — masked-helmet variant
 4. **giant-snowball** (2)
 5. **tornado** (3)
-6. **bats** (2)? — small skull-with-yellow-goggles icon, 2-cost (uncertain)
-7. a 4-cost card showing a metal/bomb-cart silhouette (uncertain — not goblin-demolisher per pod owner)
+6. **bomber** (2) — confirmed by pod owner
+7. **goblin-drill** (4) — confirmed by pod owner
 8. one slot I could not nail down across the sampled trays
-
-Two of the eight slots (#6 and #7) are visual guesses; the per-card
-findings table below treats them as "deck ID uncertain" rather than
-making claims about the model's behavior on them.
 
 ### Match 2 (`ScreenRecording_05-01-2026 04-01-24_1.MOV`, 181 s)
 Same deck as Match 1 (same player, deck appears unchanged).
@@ -100,8 +96,10 @@ observed against the on-screen reality, not a benchmark metric.
 | `knight` | 3 | 5 | 2.2% | 0.29 | **flaky** | Sub-floor confidence cluster. |
 | `tornado` | 1, 2 | **0** | 0% | — | **n/a (sampling)** | Spell visual ~0.3–1 s; 1 fps sampling almost guarantees misses. Cannot conclude detection failure from this alone. |
 | `giant-snowball` | 1, 2 | **0** | 0% | — | **n/a (sampling)** | Same — sub-frame spell visual. |
-| `bats` (deck ID uncertain) | 1, 2 | 0 | 0% | — | **unknown** | Slot #6 in Match 1's deck — visual ID is a guess. Skip until reconfirmed. |
-| 4-cost bomb-cart slot (deck ID uncertain) | 1, 2 | — | — | — | **unknown** | Slot #7 in Match 1's deck. Pod owner has confirmed it is **not** goblin-demolisher; until the actual card is named, no claim about detection on it. |
+| `bomber` | 1 | 1 | 0.4% | 0.33 | **flaky** | One detection above the default floor; at conf=0.05 the rerun shows 13 detections (5% coverage) but mean conf 0.14 — the model has a faint bomber-shaped signal that almost never crosses 0.25. Confounded by enemy-side bombers in opponent decks (bomber spawns from skeleton-barrel, etc.), so even the few default-conf hits aren't necessarily player-side. |
+| `bomber` | 2 | 0 | 0% | — | **fails (this match)** | No detections at default conf in Match 2; no low-conf rerun was performed for this video. |
+| `goblin-drill` | 1 | 10 | 4.2% | 0.36 | **good when above ground** | Drill spends most of its life buried; coverage is bound by how often it surfaces, not by the model. Max conf 0.65 — when visible, the model usually catches it. |
+| `goblin-drill` | 2 | 2 | 1.1% | 0.50 | **good when above ground** | Same pattern — sparse but high-quality hits (max 0.61). |
 | `wizard` | 3 | **0** | 0% | — | **fails** | Featured card in the deck. **0 detections even at conf=0.05** in Match 3 — clean negative. One stray `wizard` hit at 0.42 in Match 1 is unrelated (opponent had no wizard either; likely a HUD false positive). |
 | `fireball` | 3 | 1 | 0.4% | 0.93 | **catches when sampled** | Single hit at very high confidence. Spell visual is ~0.3 s so absence elsewhere is sampling, not a detector failure. |
 | `giant-skeleton` | 3 | **0** | 0% | — | **fires below floor** | Featured in deck. At conf=0.05 in Match 3: exactly 1 detection at conf 0.19 — the model has *some* weak signal but it never crosses the default 0.25 threshold. Different recommendation than mega-knight: a per-class threshold could partially recover this; a retrain probably can't be avoided either way. |
@@ -181,14 +179,14 @@ Recommendations only — none implemented in this chunk per `CHUNK.md`.
    for player-side big troops sits at zero — the pipeline shouldn't
    silently produce confident EV deltas built only on swarm units.
 
-2. **Two card slots in the Match 1/2 deck remain visually unidentified.**
-   The pod owner clarified that an earlier draft of this doc
-   mis-identified slot #7 as `goblin-demolisher`; that claim has been
-   removed. Before any EV-pipeline gating logic ships for this deck,
-   the two uncertain slots should be named (1 minute of pod-owner
-   review on a single tray screenshot) so the per-class detection
-   table can be completed. Don't bake "missing class" rules in until
-   we know the actual classes.
+2. **`bomber` needs the same per-class threshold treatment as `knight`.**
+   In the player's deck for Match 1 and 2 the `bomber` class produces
+   detections only at sub-floor confidence (median 0.10 in the
+   conf=0.05 rerun, max 0.33 across 237 frames). Side-attribution is
+   ambiguous because opponents may also run bomber-spawning cards. If
+   the EV path consumes raw `bomber` detections, recommend either a
+   raised per-class floor (~0.5) or a tracker-side filter that drops
+   single-frame `bomber` hits with no corroborating motion.
 
 3. **HUD region needs masking before detections feed downstream.** The
    bottom ~10% (card tray) and top ~12% (enemy hand chips + scoreboard)
