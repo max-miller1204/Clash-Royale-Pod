@@ -125,9 +125,7 @@ def _parquet_to_replay(path: Path, arena: str, replay_id: str, detector: YoloDet
             hud_states.append(hud_reader.read(frame_id, bgr))
         except Exception:
             ocr_failures += 1
-            hud_states.append(
-                HudState(frame=frame_id, friendly_elixir=0.0, enemy_elixir=None)
-            )
+            hud_states.append(HudState(frame=frame_id, friendly_elixir=0.0, enemy_elixir=None))
         now = time.monotonic()
         if processed % progress_every == 0 or now - last_log_wall >= 15.0:
             ocr_pct = int(round(100 * ocr_failures / processed))

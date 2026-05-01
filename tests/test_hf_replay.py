@@ -125,9 +125,7 @@ def test_parquet_to_replay_populates_hud(monkeypatch: pytest.MonkeyPatch) -> Non
     populate `Replay.hud`. Regression for the wave-2A scoping miss where the
     HF loader returned `Replay(..., hud=[])` and dropped 100% of training rows.
     """
-    fake_frames = [
-        (i, np.zeros((960, 540, 3), dtype=np.uint8)) for i in range(4)
-    ]
+    fake_frames = [(i, np.zeros((960, 540, 3), dtype=np.uint8)) for i in range(4)]
     monkeypatch.setattr(hf, "_decode_frames", lambda path: iter(fake_frames))
     stub_reader = _StubHudReader()
     monkeypatch.setattr(hf, "HudReader", lambda: stub_reader)
@@ -158,9 +156,7 @@ def test_parquet_to_replay_swallows_hud_failures(monkeypatch: pytest.MonkeyPatch
     falls back to a `HudState` with `enemy_elixir=None` so wave-2A's
     drop-on-None policy applies per-interaction, not per-replay.
     """
-    fake_frames = [
-        (i, np.zeros((960, 540, 3), dtype=np.uint8)) for i in range(3)
-    ]
+    fake_frames = [(i, np.zeros((960, 540, 3), dtype=np.uint8)) for i in range(3)]
     monkeypatch.setattr(hf, "_decode_frames", lambda path: iter(fake_frames))
 
     class _FlakyReader:
