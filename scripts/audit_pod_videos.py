@@ -58,7 +58,10 @@ def _iter_frames(path: Path, target_fps: float) -> list[tuple[int, np.ndarray]]:
     return out
 
 
-def _draw(frame: np.ndarray, boxes: list[tuple[str, float, tuple[float, float, float, float]]]) -> np.ndarray:
+def _draw(
+    frame: np.ndarray,
+    boxes: list[tuple[str, float, tuple[float, float, float, float]]],
+) -> np.ndarray:
     img = frame.copy()
     for cls, conf, (x1, y1, x2, y2) in boxes:
         color = (0, 255, 0) if conf >= 0.5 else (0, 165, 255)
@@ -69,7 +72,14 @@ def _draw(frame: np.ndarray, boxes: list[tuple[str, float, tuple[float, float, f
     return img
 
 
-def audit(weights: Path, video: Path, out_dir: Path, target_fps: float, conf: float, sample_every: int) -> None:
+def audit(
+    weights: Path,
+    video: Path,
+    out_dir: Path,
+    target_fps: float,
+    conf: float,
+    sample_every: int,
+) -> None:
     from ultralytics import YOLO
 
     model = YOLO(str(weights))
@@ -100,7 +110,10 @@ def audit(weights: Path, video: Path, out_dir: Path, target_fps: float, conf: fl
                     cls = str(names[cls_id])
                     c = float(box.conf.item())
                     x1, y1, x2, y2 = (float(v) for v in box.xyxy[0].tolist())
-                    w.writerow([fidx, cls, f"{c:.4f}", f"{x1:.1f}", f"{y1:.1f}", f"{x2:.1f}", f"{y2:.1f}"])
+                    w.writerow([
+                        fidx, cls, f"{c:.4f}",
+                        f"{x1:.1f}", f"{y1:.1f}", f"{x2:.1f}", f"{y2:.1f}",
+                    ])
                     per_class_confs[cls].append(c)
                     per_class_frames[cls].add(fidx)
                     boxes_for_draw.append((cls, c, (x1, y1, x2, y2)))
@@ -111,7 +124,10 @@ def audit(weights: Path, video: Path, out_dir: Path, target_fps: float, conf: fl
 
     with cls_csv.open("w", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(["cls", "n_detections", "n_frames", "frame_coverage_pct", "mean_conf", "median_conf", "max_conf", "is_pad"])
+        w.writerow([
+            "cls", "n_detections", "n_frames", "frame_coverage_pct",
+            "mean_conf", "median_conf", "max_conf", "is_pad",
+        ])
         rows = []
         for cls, confs in per_class_confs.items():
             n = len(confs)
@@ -125,14 +141,21 @@ def audit(weights: Path, video: Path, out_dir: Path, target_fps: float, conf: fl
         rows.sort(key=lambda r: (-r[1]))
         for r in rows:
             cls, n, nf, cov, mn, md, mx, ispad = r
-            w.writerow([cls, n, nf, f"{cov:.1f}", f"{mn:.3f}", f"{md:.3f}", f"{mx:.3f}", "1" if ispad else "0"])
+            w.writerow([
+                cls, n, nf,
+                f"{cov:.1f}", f"{mn:.3f}", f"{md:.3f}", f"{mx:.3f}",
+                "1" if ispad else "0",
+            ])
 
     print(f"[{video.name}] wrote {det_csv.name}, {cls_csv.name}")
     print(f"[{video.name}] top 15 classes by detection count:")
     for r in rows[:15]:
         cls, n, nf, cov, mn, md, mx, ispad = r
         tag = "  (PAD)" if ispad else ""
-        print(f"  {cls:30s}  n={n:5d}  frames={nf:4d} ({cov:5.1f}%)  mean={mn:.2f}  med={md:.2f}  max={mx:.2f}{tag}")
+        print(
+            f"  {cls:30s}  n={n:5d}  frames={nf:4d} ({cov:5.1f}%)  "
+            f"mean={mn:.2f}  med={md:.2f}  max={mx:.2f}{tag}"
+        )
 
 
 def main() -> None:
@@ -142,8 +165,10 @@ def main() -> None:
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--fps", type=float, default=1.0)
     ap.add_argument("--conf", type=float, default=0.25)
-    ap.add_argument("--sample-every", type=int, default=20,
-                    help="save an annotated frame every Nth sampled frame (1 fps default => every 20s)")
+    ap.add_argument(
+        "--sample-every", type=int, default=20,
+        help="save an annotated frame every Nth sampled frame (1 fps default => every 20s)",
+    )
     ap.add_argument("--glob", default="*.MOV")
     args = ap.parse_args()
 

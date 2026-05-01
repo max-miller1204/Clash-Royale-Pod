@@ -99,7 +99,7 @@ class TestMappingValidity:
         """Sentinel: the set must stay empty. If a new card appears whose
         cost is genuinely unknown, add it to CARD_COSTS with a sourced
         value rather than re-populating this set."""
-        assert _KNOWN_UNCONFIRMED_COSTS == frozenset()
+        assert frozenset() == _KNOWN_UNCONFIRMED_COSTS
 
     def test_no_overlap_between_card_and_non_card(self):
         overlap = set(KATACR_TO_CARD.keys()) & KATACR_NON_CARD
