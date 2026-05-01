@@ -52,11 +52,12 @@ flag it with `?`.
 ### Match 1 (`ScreenRecording_05-01-2026 03-56-58_1.MOV`, 236 s)
 1. **mega-knight** (7) — visible in `Next:` slot at 35 s, 70 s, 117 s, 198 s
 2. **mini-pekka** (4)
-3. **knight** (3) — masked-helmet variant
+3. **mega-minion** (3) — pod owner correction; previously mis-identified
+   as `knight` in earlier drafts based on the masked-helmet icon
 4. **giant-snowball** (2)
 5. **tornado** (3)
-6. **bomber** (2) — confirmed by pod owner
-7. **goblin-drill** (4) — confirmed by pod owner
+6. **bomber** (2) — pod-owner confirmed
+7. **goblin-drill** (4) — pod-owner confirmed
 8. one slot I could not nail down across the sampled trays
 
 ### Match 2 (`ScreenRecording_05-01-2026 04-01-24_1.MOV`, 181 s)
@@ -66,7 +67,9 @@ Same deck as Match 1 (same player, deck appears unchanged).
 Different archetype — wizard / fireball / heavy beatdown:
 1. **wizard** (5)
 2. **mini-pekka** (4)
-3. **knight** (3)
+3. masked-helmet 3-cost slot — previously labeled `knight`; pod owner
+   does not run knight, so this is most likely **mega-minion** (the
+   same correction as the Match 1/2 deck) but should be reconfirmed
 4. **fireball** (4)
 5. **giant-skeleton** (6)
 6. **zappies** (4)
@@ -91,9 +94,9 @@ observed against the on-screen reality, not a benchmark metric.
 |------|-------|---|----------|-----------|--------|-------|
 | `mega-knight` | 1, 2 | **0** | 0% | — | **fails** | Featured in player's hand frequently. **0 detections even at conf=0.05** in Match 1 — clean negative. Likely the worst single regression on pod footage. |
 | `mini-pekka` | 1, 2, 3 | **0** | 0% | — | **fails** | In every match's deck. At conf=0.05 in Match 1: 1 lone sub-floor detection across 237 frames — effectively zero. |
-| `knight` | 1 | 2 | 0.8% | 0.32 | **flaky** | Both detections hover at the conf floor and at least one looked like a card-tray HUD false-positive (boxed on the bottom card icon, not the field). |
-| `knight` | 2 | 22 | 12% | 0.48 | **flaky** | Better — peaked at 0.94 once but median 0.36; many low-conf hits. |
-| `knight` | 3 | 5 | 2.2% | 0.29 | **flaky** | Sub-floor confidence cluster. |
+| `mega-minion` | 1 | 4 | 1.7% | 0.49 | **flaky** | Slot #3 of pod's deck. Sparse but max conf only 0.57; the conf=0.05 rerun pulls in 21 detections (8.4% coverage) but median drops to 0.12 — model has a faint signal that mostly misses the floor. |
+| `mega-minion` | 2 | 5 | 2.8% | 0.39 | **flaky** | Same pattern as Match 1; max conf 0.57. |
+| `knight` (opponent / FP) | 1, 2, 3 | 2 / 22 / 5 | 0.8% / 12% / 2.2% | 0.32 / 0.48 / 0.29 | **n/a (not in pod deck)** | Pod owner confirmed they do not run knight in any of these matches. The `knight` detections here are either opponent-side units or HUD false-positives on card-tray icons. Match 2's higher count (max conf 0.94) is most plausibly an opponent's knight deployed in front of a tower. Detection quality data still useful for opponent-card EV inference, but not for pod-deck gating. |
 | `tornado` | 1, 2 | **0** | 0% | — | **n/a (sampling)** | Spell visual ~0.3–1 s; 1 fps sampling almost guarantees misses. Cannot conclude detection failure from this alone. |
 | `giant-snowball` | 1, 2 | **0** | 0% | — | **n/a (sampling)** | Same — sub-frame spell visual. |
 | `bomber` | 1 | 1 | 0.4% | 0.33 | **flaky** | One detection above the default floor; at conf=0.05 the rerun shows 13 detections (5% coverage) but mean conf 0.14 — the model has a faint bomber-shaped signal that almost never crosses 0.25. Confounded by enemy-side bombers in opponent decks (bomber spawns from skeleton-barrel, etc.), so even the few default-conf hits aren't necessarily player-side. |
@@ -197,14 +200,17 @@ Recommendations only — none implemented in this chunk per `CHUNK.md`.
    whose centroid falls in `y < 0.13 * H` or `y > 0.87 * H` *before*
    tracking. This is a one-line guard, not a model change.
 
-4. **For the `knight` class specifically: raise the confidence floor.**
-   On pod footage, `knight` mostly produces sub-0.4 detections, many
-   of which we visually traced to HUD-tray icons rather than the
-   on-field knight. Recommend treating `knight` detections below 0.55
-   as noise for the EV path. (Recommendation only; do **not** change
-   `YoloDetector`'s default `conf` — that would silently drop other
-   classes.) The cleaner home for this is per-class confidence
-   thresholds, which the codebase doesn't have today.
+4. **Per-class confidence thresholds are the missing primitive.**
+   Several classes show distinct, class-specific confidence profiles
+   on pod footage (`mega-minion` and `bomber` produce mostly sub-floor
+   hits; `goblin` produces high-coverage HUD false positives; `knight`
+   detections, all opponent-side here, peak as high as 0.94 but mean
+   sub-0.4). The cleanest fix is a per-class threshold dict consulted
+   in `YoloDetector.infer` *before* it appends to its detection list,
+   rather than the single global `conf=0.25`. **Recommendation only**;
+   do not change the global default — that would silently drop other
+   classes. This belongs in a separate PR with empirical per-class
+   floors derived from a wider audit run.
 
 5. **Spells are out of reach at 1 fps and likely 5 fps.** `fireball`
    produced one 0.93 detection; tornado and snowball produced none. The
