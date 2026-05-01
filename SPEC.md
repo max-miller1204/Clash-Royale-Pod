@@ -161,3 +161,5 @@ _Wave 1 executed 2026-05-01 on branch swarm/finish-project-wave-1; chunks 1a-sid
 _Wave 2 executed 2026-05-01 on branch swarm/finish-project-wave-2; chunks 2a-ev-label, 2b-retrain-validate; PR https://github.com/max-miller1204/Clash-Royale-Pod/pull/26_
 
 _Wave 2C executed 2026-05-01 on branch swarm/finish-project-wave-2c-hud-on-hf; chunks 2c-hud-on-hf (structural fix only — `Replay.hud` now populated from HF parquet); PR https://github.com/max-miller1204/Clash-Royale-Pod/pull/27 (stacked on #26). Real `docs/ev-validation.md` metrics deferred to wave 2D (brev retrain run)._
+
+_Wave 2D executed 2026-05-01 on branch swarm/finish-project-wave-2d-brev-metrics; chunks 2d-brev-metrics (smoke run on H100; 47/47 rows dropped because tesseract 4.1.1 cannot read CR's stylised in-game HP digits — 0/583 frames had all four princess HPs readable). Diagnosis pinned in `docs/ev-validation.md`. Real metrics still pending — needs wave 2E to replace the OCR digit reader (HP-bar pixel sampling recommended). PR pending._
