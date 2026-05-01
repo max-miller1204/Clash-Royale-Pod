@@ -30,15 +30,23 @@ class CardPlay:
 
 @dataclass(frozen=True)
 class HudState:
-    """Per-frame HUD reading."""
+    """Per-frame HUD reading.
+
+    Tower-HP fields are flat (left/right rather than tuples) so the EV target
+    builder in `crpod.features.ev_target` can name each tower in its output
+    dict without index ceremony. King HP is read separately because
+    `HudRegions.{friendly,enemy}_king` is still rough — see `docs/TODO.md`.
+    """
 
     frame: int
     friendly_elixir: float
     enemy_elixir: float | None
-    friendly_king_hp: int | None
-    enemy_king_hp: int | None
-    friendly_princess_hp: tuple[int | None, int | None] = (None, None)
-    enemy_princess_hp: tuple[int | None, int | None] = (None, None)
+    friendly_king_hp: int | None = None
+    enemy_king_hp: int | None = None
+    friendly_left_princess_hp: int | None = None
+    friendly_right_princess_hp: int | None = None
+    enemy_left_princess_hp: int | None = None
+    enemy_right_princess_hp: int | None = None
 
 
 @dataclass
@@ -65,6 +73,11 @@ class Interaction:
     enemy_elixir_spent: int
     damage_dealt: int = 0
     damage_taken: int = 0
+    # Per-side, per-tower princess HP swing across the interaction window.
+    # Keys: "friendly_left", "friendly_right", "enemy_left", "enemy_right".
+    # Value sign convention: end_hp - start_hp (negative = HP lost).
+    # `None` for any tower whose start- or end-frame HUD reading was unreadable.
+    tower_hp_delta: dict[str, int | None] = field(default_factory=dict)
 
     @property
     def elixir_trade(self) -> int:

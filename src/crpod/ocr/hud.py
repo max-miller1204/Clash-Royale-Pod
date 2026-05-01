@@ -49,12 +49,22 @@ class HudReader:
         self._lazy_load()
         friendly_elixir = self._read_number(frame, self.regions.friendly_elixir)
         enemy_elixir = self._read_number(frame, self.regions.enemy_elixir)
+        # Princess-tower HP regions are tuned in `HudRegions`; king-HP rects
+        # are still rough (see `docs/TODO.md`), so leave king HP `None` here.
+        friendly_left = self._read_number(frame, self.regions.friendly_tower_left)
+        friendly_right = self._read_number(frame, self.regions.friendly_tower_right)
+        enemy_left = self._read_number(frame, self.regions.enemy_tower_left)
+        enemy_right = self._read_number(frame, self.regions.enemy_tower_right)
         return HudState(
             frame=frame_idx,
             friendly_elixir=float(friendly_elixir or 0),
             enemy_elixir=float(enemy_elixir) if enemy_elixir is not None else None,
             friendly_king_hp=None,
             enemy_king_hp=None,
+            friendly_left_princess_hp=friendly_left,
+            friendly_right_princess_hp=friendly_right,
+            enemy_left_princess_hp=enemy_left,
+            enemy_right_princess_hp=enemy_right,
         )
 
     def _read_number(self, frame: np.ndarray, region: tuple[int, int, int, int]) -> int | None:
