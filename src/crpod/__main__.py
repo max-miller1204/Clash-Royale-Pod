@@ -17,6 +17,23 @@ from pathlib import Path
 from crpod.dataset.huggingface import HFReplayLoader
 from crpod.modeling.ev import EvModel
 from crpod.pipeline import analyze_hf_replay, analyze_replay
+from crpod.types import Interaction
+
+
+def _training_target(interaction: Interaction) -> float | None:
+    """Princess-tower HP-delta EV target for one interaction.
+
+    Returns `None` when any of the four princess deltas is unreadable so
+    callers can drop the row.
+    """
+    delta = interaction.tower_hp_delta
+    fl = delta.get("friendly_left")
+    fr = delta.get("friendly_right")
+    el = delta.get("enemy_left")
+    er = delta.get("enemy_right")
+    if fl is None or fr is None or el is None or er is None:
+        return None
+    return float((fl + fr) - (el + er))
 
 
 def _positive_float(value: str) -> float:
@@ -147,13 +164,26 @@ def _cmd_train(args: argparse.Namespace) -> int:
     loader = HFReplayLoader(yolo_weights=args.weights)
     rows: list[dict] = []
     targets: list[float] = []
+    seen = 0
+    dropped = 0
     available = loader.list_replays(arena=args.arena)[: args.max_replays]
     for arena, replay_id in available:
         replay = loader.load(arena, replay_id)
         result = analyze_replay(replay)
         for interaction, row in zip(result.interactions, result.feature_rows, strict=True):
+            seen += 1
+            target = _training_target(interaction)
+            if target is None:
+                dropped += 1
+                continue
             rows.append(row)
-            targets.append(float(interaction.elixir_trade))
+            targets.append(target)
+    if seen:
+        pct = round(100 * dropped / seen)
+        print(
+            f"dropped {dropped}/{seen} training rows ({pct}% — unreadable HUD)",
+            file=sys.stderr,
+        )
     if not rows:
         print("no training data collected", file=sys.stderr)
         return 1
