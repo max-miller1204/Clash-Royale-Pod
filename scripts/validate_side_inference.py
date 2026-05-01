@@ -58,12 +58,13 @@ def _is_tower(cls: str) -> bool:
     return any(k in cls.lower() for k in TOWER_KEYWORDS)
 
 
-def _list_first_replay(arena: str, token: str | None = None) -> str:
-    """Return the first replay_id available for `arena`."""
+def _list_first_replays(arena: str, n: int = 1, token: str | None = None) -> list[str]:
+    """Return up to `n` replay_ids available for `arena`, in dataset order."""
     from huggingface_hub import HfApi
 
     api = HfApi(token=token)
     files = api.list_repo_files(DATASET_ID, repo_type="dataset")
+    out: list[str] = []
     for f in files:
         if not f.endswith("/frames.parquet"):
             continue
@@ -72,8 +73,12 @@ def _list_first_replay(arena: str, token: str | None = None) -> str:
             continue
         a, r = parts[-3], parts[-2]
         if a == arena:
-            return r
-    raise SystemExit(f"no replays found for {arena}")
+            out.append(r)
+            if len(out) >= n:
+                break
+    if not out:
+        raise SystemExit(f"no replays found for {arena}")
+    return out
 
 
 def _pick_mid_frame(parquet_path: Path) -> tuple[int, np.ndarray]:
@@ -157,13 +162,29 @@ def _draw(img: np.ndarray, dets: list[Detection]) -> np.ndarray:
     return out
 
 
+def _side_counts(dets: list[Detection]) -> tuple[int, int, int]:
+    """Return (friendly, enemy, unknown) counts across all detections."""
+    f = e = u = 0
+    for d in dets:
+        side = _infer_side(int(d.center[1]))
+        if side is Side.FRIENDLY:
+            f += 1
+        elif side is Side.ENEMY:
+            e += 1
+        else:
+            u += 1
+    return f, e, u
+
+
 def _verdict_line(dets: list[Detection], img_shape: tuple[int, int]) -> str:
     h, w = img_shape
     towers = [d for d in dets if _is_tower(d.cls)]
     enemy_towers = sum(1 for d in towers if _infer_side(int(d.center[1])) is Side.ENEMY)
     friendly_towers = sum(1 for d in towers if _infer_side(int(d.center[1])) is Side.FRIENDLY)
+    fr, en, un = _side_counts(dets)
     return (
         f"frame={h}x{w}  RIVER_Y={RIVER_Y}  midpoint={h // 2}  "
+        f"all dets: {fr} friendly / {en} enemy / {un} unknown ({len(dets)} total)  "
         f"towers: {friendly_towers} friendly / {enemy_towers} enemy / {len(towers)} total"
     )
 
@@ -177,6 +198,12 @@ def main() -> None:
         "--arena",
         action="append",
         help="repeat to override default arena set (uses first replay in each)",
+    )
+    p.add_argument(
+        "--per-arena",
+        type=int,
+        default=1,
+        help="how many replays per --arena to validate (default: 1)",
     )
     p.add_argument(
         "--replay",
@@ -196,7 +223,7 @@ def main() -> None:
         replays = [(a, r) for a, r in args.replay]
     else:
         arenas = args.arena or [a for a, _ in DEFAULT_REPLAYS]
-        replays = [(a, _list_first_replay(a)) for a in arenas]
+        replays = [(a, r) for a in arenas for r in _list_first_replays(a, n=args.per_arena)]
 
     detector = YoloDetector(args.weights, conf=args.conf)
     print(f"validating side inference on {len(replays)} replays")
