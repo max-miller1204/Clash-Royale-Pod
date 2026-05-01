@@ -39,7 +39,7 @@ Remaining work to finish the Clash Royale Post-Game Analyzer, grouped by what un
 ## Integration (blocked on YOLO + OCR)
 
 - [x] **Wire HF replay path through YOLO.** The HF dataset contains raw frame images, not pre-extracted placements. `_parquet_to_replay` now decodes frames from parquet and runs `YoloDetector` to extract `CardPlay` events. `analyze` and `train` CLI subcommands require `--weights`. Blocked on trained weights landing.
-- [x] **Wire `analyze_video` end-to-end.** In `src/crpod/pipeline.py`: `VideoFrameIterator → YoloDetector → Tracker → HudReader → CardPlay/HudState stream → analyze_replay`. The `crpod analyze-video PATH` CLI subcommand pre-validates inputs (video, weights, optional EV model, `--target-fps`) before any heavy import, writes `summary.json` with `replay_id`/`arena`/`source_video`/`n_plays`/`n_interactions`/`friendly_leak`/`enemy_leak`, and degrades viz failures to a stderr warning. See `specs/001-analyze-video/`.
+- [x] **Wire `analyze_video` end-to-end.** In `src/crpod/pipeline.py`: `VideoFrameIterator → YoloDetector → Tracker → HudReader → CardPlay/HudState stream → analyze_replay`. The `crpod analyze-video PATH` CLI subcommand pre-validates inputs (video, weights, optional EV model, `--target-fps`) before any heavy import, writes `summary.json` with `replay_id`/`arena`/`source_video`/`n_plays`/`n_interactions`/`friendly_leak`/`enemy_leak`, and degrades viz failures to a stderr warning.
 
 ## Real-time mode (scope expansion past the 10-week timeline)
 
