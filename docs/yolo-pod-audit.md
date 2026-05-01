@@ -58,25 +58,37 @@ flag it with `?`.
 5. **tornado** (3)
 6. **bomber** (2) — pod-owner confirmed
 7. **goblin-drill** (4) — pod-owner confirmed
-8. one slot I could not nail down across the sampled trays
+8. one slot — pod owner suspects an earlier draft was double-counting
+   either tornado or mega-knight as a separate "8th" card; I have 7
+   distinct cards confirmed and the 8th slot remains unidentified
+   from these samples
 
 ### Match 2 (`ScreenRecording_05-01-2026 04-01-24_1.MOV`, 181 s)
 Same deck as Match 1 (same player, deck appears unchanged).
 
 ### Match 3 (`ScreenRecording_05-01-2026 04-04-50_1.MOV`, 229 s)
-Different archetype — wizard / fireball / heavy beatdown:
+Different archetype — wizard / fireball / heavy beatdown. After two
+rounds of pod-owner correction this is **6 of 8** confirmed; the doc
+no longer claims the deck is fully enumerated.
+
 1. **wizard** (5)
 2. **mini-pekka** (4)
-3. masked-helmet 3-cost slot — previously labeled `knight`; pod owner
-   does not run knight, so this is most likely **mega-minion** (the
-   same correction as the Match 1/2 deck) but should be reconfirmed
-4. **fireball** (4)
+3. **zappies** (4) — pod owner correction; an earlier draft listed this
+   slot as `knight`, then `mega-minion`. Both wrong; the 4-elixir
+   helmeted-mechanical icon I was reading as a small humanoid is the
+   zappies card. (This collapses what I had as separate slots #3 and
+   #6 into the same card.)
+4. **fireball** (4) — confirmed
 5. **giant-skeleton** (6)
-6. **zappies** (4)
-7. an orange "welder/cossack" 4-cost — possibly **mighty-miner** or
-   **goblin-machine** (uncertain)
+6. — (was a duplicate ID of zappies; see slot #3)
+7. — (the orange "welder/cossack" icon I previously could not name was
+   the fireball card art; collapses into slot #4)
 8. a 2-cost redhead-with-axe — likely a champion **ability** card slot
    (cost shown is the ability cost, not the base deploy cost)
+
+Net: 6 confirmed cards (wizard, mini-pekka, zappies, fireball,
+giant-skeleton, plus one champion ability), 2 deck slots still
+unidentified from these samples.
 
 ---
 
