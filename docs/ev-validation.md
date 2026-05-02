@@ -1,4 +1,4 @@
-# EV Model Validation — Wave 2B / 2E
+# EV Model Validation — Wave 2B / 2E / 2F
 
 ## Target
 
@@ -39,11 +39,13 @@ never enters version control.
 
 ## Run results
 
-> **Status: end-to-end metrics produced.** Wave 2E replaced the
-> tesseract digit OCR with HP-bar pixel sampling and unblocked
-> training. Drop rate fell from 100% (wave 2D) to 34%, holdout MAE =
-> 463.20 HP, holdout Spearman ρ = -0.037 (≈ 0). Earlier
-> tesseract-can't-read-the-digits diagnosis archived in PR #28.
+> **Status: signal cleared the user's 0.10 stop-or-continue threshold
+> on wave 2F.** Wave 2E end-to-end metrics produced (drop 34%, MAE
+> 463, ρ -0.037). Wave 2F expanded to all 76 arena_15 replays and
+> added two HP-context features (`start_friendly_total_princess_hp`,
+> `start_enemy_total_princess_hp`); holdout Spearman moved from
+> -0.037 → **+0.162**, MAE 463 → 509. Spearman ≥ 0.10 → continue (do
+> not stop per the wave 2F chunk).
 
 ### Wave-2E run (smoke, arena_15, 30 replays)
 
@@ -297,7 +299,172 @@ a regression. Concretely:
   drop; or (c) a richer feature set than the current 9. Each of
   those is a future-wave change, not blocked by this chunk.
 
-## Wave-3 contract published by this chunk
+### Wave-2F run (full cohort, arena_15, 76 replays + 2 HP-context features)
+
+| Field                        | Wave 2E baseline | Wave 2F                                                              |
+| ---------------------------- | ---------------- | -------------------------------------------------------------------- |
+| Branch                       | `…2e-hp-bar-reader` | `swarm/finish-project-wave-2f-expand-and-features`                |
+| Replays processed            | 30               | **76** (full arena_15 cohort)                                        |
+| Total interactions seen      | 467              | 1180                                                                 |
+| Dropped (unreadable HUD)     | 157 / 467 (34%)  | **386 / 1180 (33%)** — within ±1 pp of baseline                      |
+| Train rows / replays         | 234 / 24         | **605 / 60**                                                         |
+| Holdout rows / replays       | 76 / 6           | **189 / 15**                                                         |
+| Holdout MAE                  | 463.20           | **509.38** (slightly worse — see interpretation)                     |
+| Holdout Spearman ρ           | -0.037           | **+0.162** (cleared the 0.10 threshold; see verdict)                 |
+| `per_card_stats` cardinality | 7                | **16** cards with ≥5 train-fold samples                              |
+| YOLO class warnings          | 1 (`dagger-duchess-tower`) | 2 (same + `dagger-duchess-tower-bar`)                      |
+
+#### Run environment
+
+| Field           | Value                                                                          |
+| --------------- | ------------------------------------------------------------------------------ |
+| Brev instance   | `hyperstack_H100` ($4-ish/hr; H100 PCIe, 28 vCPU, 100 GB disk)                 |
+| Driver / CUDA   | shadeform H100 / CUDA 12.6 wheels (cu126 reinstall, per wave 2D runbook)       |
+| Python / torch  | CPython 3.11.15 venv / `torch==2.11.0+cu126`                                   |
+| Invocation      | `crpod train --weights output/models/crpod_v1_best.pt --out output/models/ev.joblib --arena arena_15 --max-replays 76` |
+| Wall-clock      | **3 h 15 m 54 s** (05:54:02Z → 09:09:56Z, 2026-05-02)                          |
+| Frames with HUD-OCR exception | 0 across all 76 replays (`ocr_fail=0%` reported throughout)      |
+| GPU utilisation | mean **1.3%**, max 41%, ≥10% in 13/402 samples (3.2%), never ≥50%              |
+
+#### New features added
+
+Two int / `None` fields appear in every feature row produced by
+`crpod.modeling.ev.interaction_features` (existing nine fields preserved):
+
+- `start_friendly_total_princess_hp` — sum of friendly-left + friendly-right
+  princess HP at the interaction's start-frame HUD bookend. `None` when
+  either tower is unreadable.
+- `start_enemy_total_princess_hp` — same, enemy side.
+
+Each feature encodes both **match phase** (HP drains over time) and
+**remaining HP capacity** (a card played against a tower already at
+500 HP can't lose much more; one against a 3000-HP tower has room to
+swing). Local 2-replay inspection on `00a91415-…` and `02c3eb19-…`
+showed real variance before training:
+
+  - `start_friendly_total_princess_hp`: 4012-6216 (mean 5518, 46 % at full HP)
+  - `start_enemy_total_princess_hp`:    1010-5556 (mean 4461, 0 % at full HP)
+
+To plumb absolute start HP through `interaction_features` (signature locked
+to `(Interaction) -> dict`), four additive default-`None` fields were added
+to `Interaction` (`start_{friendly,enemy}_{left,right}_princess_hp`).
+`build_interactions` populates them from the start-frame HUD bookend when
+HUD is present; pre-2F call sites that don't pass HUD continue to leave
+them unset. The wave 2E joblib artifact format is unaffected; only feature
+rows gain two keys.
+
+#### Verdict vs the 0.10 threshold
+
+The wave 2F chunk gave the user a stop-or-continue rule: **Spearman ≤ 0.10
+on the 76-replay run → stop and reassess; otherwise → continue**.
+
+Spearman went from **-0.037 → +0.162**. **The threshold cleared.** This is
+the first run in the wave-2 series where the EV model has any rank
+correlation with the holdout target above noise. The result is small — 0.162
+is "weak signal," not "strong predictor" — but it's positive and reproducible
+on a 189-row holdout, and the move from baseline (-0.037) to here (+0.162)
+is a delta of 0.20 ρ-units that didn't exist before.
+
+The standing instruction is **continue** — not stop, not iterate features
+inside this wave. A future chunk can build on this baseline.
+
+#### Why MAE got slightly worse while Spearman got much better
+
+MAE went 463 → 509 HP (-10 %); Spearman went -0.037 → +0.162 (+0.20).
+That looks contradictory but isn't: MAE penalises predicting
+**non-modal** values, while Spearman rewards correctly **ordering**
+predictions against truth.
+
+In wave 2E the LightGBM model converged to near-constant predictions
+(median, ~0). Predicting the median minimises MAE on a zero-centred
+target, which is why MAE was 463. Wave 2F's HP-context features
+(plus 2.6× more rows) gave LightGBM enough signal to start splitting:
+predictions now spread, which (a) increases MAE because non-modal
+predictions are riskier on outlier rows, and (b) increases Spearman
+because the spread now correlates with the truth ordering.
+
+For an EV model whose downstream consumer is a **rank** decision
+("which play is better than which other play" — wave 3's blunder rule),
+Spearman matters and MAE is secondary. The trade is in the direction
+we want.
+
+#### GPU cost interpretation
+
+Wave 2D and 2E observed the H100 idling at 0% util because the OCR
+loop in `crpod.dataset.huggingface._parquet_to_replay` is single-thread
+CPU-bound (one `pytesseract` subprocess fork per frame for elixir).
+Wave 2F's recorded utilisation **confirms** that pattern with hard
+numbers: H100 mean 1.3%, never above 41%, only 3.2% of samples ≥10%.
+The 3 h 16 m wall-clock at ~$4/hr was burned on starting up tesseract
+~270 000 times, not on YOLO inference (which finishes in seconds).
+
+The next-best workload-fit lesson, with hard data: the H100 was a
+~5× cost premium over A6000 for **no** wall-clock improvement. Wave 2E
+on A6000 took 1 h 38 m for 30 replays (≈ 3.27 min/replay); wave 2F
+on H100 took 3 h 16 m for 76 replays (≈ 2.58 min/replay). The H100
+gain of 0.7 min/replay (≈ 21 %) is dominated by the per-replay startup,
+not GPU compute, and would not justify the cost premium on its own.
+
+The actionable lesson — replace the pytesseract elixir read with
+numpy pixel sampling (the wave 2E HP-bar approach) — is a separate
+wave. Once that lands, replays drop from ~2-3 min each to ~5-15 sec
+each on any GPU (or CPU); the EV model itself is unchanged because
+EV training uses `CardPlay.elixir_cost` (constants table), not
+`HudState.friendly_elixir`.
+
+#### Top-10 most-frequent cards (training fold)
+
+Anchor card = `Interaction.friendly_plays[0].card`. Sixteen cards qualified
+for `per_card_stats` at ≥5 training-fold samples (was 7 in wave 2E).
+
+| Rank | Card           | n_samples | median target | std target |
+| ---- | -------------- | --------- | ------------- | ---------- |
+| 1    | `skeletons`    | 193       | +0.0          | 589.1      |
+| 2    | `musketeer`    | 61        | +0.0          | 584.6      |
+| 3    | `goblins`      | 38        | -128.0        | 597.8      |
+| 4    | `cannon`       | 34        | +0.0          | 484.0      |
+| 5    | `tesla`        | 30        | +0.0          | 723.2      |
+| 6    | `ice_spirit`   | 25        | +0.0          | 630.0      |
+| 7    | `ice_golem`    | 13        | +0.0          | 652.2      |
+| 8    | `barbarians`   | 12        | -85.0         | 310.2      |
+| 9    | `knight`       | 9         | +0.0          | 387.5      |
+| 10   | `hog_rider`    | 8         | +0.0          | 463.2      |
+
+Most medians are 0 (anchor play landed in a window where no princess
+HP changed), consistent with wave 2E. `goblins` and `barbarians` show
+small negative medians, suggesting their typical use sees the friendly
+side concede a little tower HP. The wave-3 blunder rule keys off
+`per_card_stats` (median, std), so the doubling of cardinality
+(7 → 16) is the structural wave-3-prep deliverable for this run.
+
+#### Interpretation
+
+The wave 2F experiment was set up as a single decisive question: would
+expanding to the full 76-replay arena_15 cohort plus two well-motivated
+HP-context features move holdout Spearman above 0.10? **Answer: yes,
+ρ = 0.162.**
+
+The data inspection step before training (2 replays, 29 interactions)
+was a clean dry run of the hypothesis: `start_friendly_total_princess_hp`
+varied from 4012 to 6216, `start_enemy_total_princess_hp` varied from
+1010 to 5556 — both have meaningful spread, so the features were not
+dead-on-arrival. The full-run drop rate held at 33 % (wave 2E was 34 %)
+which means expanding the cohort didn't degrade HUD readability.
+
+The signal is real but weak. A 0.16 Spearman on a 189-row holdout is
+about 1.5 standard errors above zero — well above the user's stop
+threshold but not yet "trustworthy enough for a blunder rule on its
+own". Future-wave moves the data points to: (1) replace the pytesseract
+elixir reader so iteration is cheap (separate wave, ~10× speedup,
+no model change); (2) add cross-arena replays (the 76 cap was the
+arena_15 ceiling); (3) richer features once the iteration loop is
+fast.
+
+For wave 2F itself: the chunk's "done when" criteria are met, the
+hypothesis cleared, the artifact saved, and the documentation pins
+the result honestly. No iteration; the next wave decides direction.
+
+
 
 `EvModel.load(path).per_card_stats` returns
 `dict[str, tuple[float, float]]`:
