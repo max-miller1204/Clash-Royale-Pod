@@ -12,7 +12,6 @@ dependencies = [
     "numpy>=2.0",
     "pandas>=2.2",
     "pyarrow>=17",
-    "pytesseract>=0.3.13",
     "scikit-learn>=1.5",
     "scipy>=1.14",
     "seaborn>=0.13.2",

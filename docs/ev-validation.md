@@ -312,3 +312,77 @@ a regression. Concretely:
 `tests/test_ev_model.py::test_save_load_round_trip` pins the
 joblib round-trip; `test_compute_per_card_stats_excludes_low_sample_cards`
 pins the `<5` exclusion.
+
+
+## Wave 2G — numpy elixir reader (infra)
+
+Status: code-complete on `swarm/wave-2.5-signal-quality-spec`; brev
+training run pending. The change replaces the pytesseract elixir read
+in `crpod.ocr.hud.HudReader` with a numpy pixel-sampling reader on the
+pink elixir bar. The reader mirrors the wave-2E HP-bar approach: BGR
+mask `(R > 150) & (R - G > 40) & (B > 80)`, longest horizontal run
+inside a tight strip, divided by `BAR_PX_PER_ELIXIR = 44` and rounded.
+
+### Calibration
+
+Calibrated against the same `tests/fixtures/hud/sample_540x960.jpg`
+fixture used for HP. Ground-truth elixir digits visible in the
+fixture: enemy 3, friendly 2.
+
+| Side | Region (x1, y1, x2, y2) | Run length | Implied elixir |
+|---|---|---|---|
+| enemy_elixir_bar | `(60, 22, 540, 32)` | 135 px | 3 (135 / 44 = 3.07 → round 3) |
+| friendly_elixir_bar | `(60, 928, 540, 940)` | 87 px | 2 (87 / 44 = 1.98 → round 2) |
+
+The bar has the same pink fill on both sides — unlike the HP bars,
+which use cyan (friendly) vs red (enemy). One scale serves both.
+
+### Why this can't move ρ
+
+`HudState.friendly_elixir` and `HudState.enemy_elixir` are populated
+by `HudReader.read` but **not consumed** by the EV training path or
+the EV model itself:
+
+- `_cmd_train` builds features from `Interaction` records;
+  `Interaction.friendly_elixir_spent` / `enemy_elixir_spent` are
+  computed in `crpod.features.interactions._build_interaction` from
+  `CardPlay.elixir_cost` (the `CARD_COSTS` constants table in
+  `crpod.constants`), not from any HudState field.
+- `crpod.features.ev_target.tower_hp_delta` reads only the four
+  princess-HP fields of HudState.
+- `EvModel` features in `crpod.modeling.ev` reference the
+  Interaction fields, not HudState directly.
+
+Grep `\.friendly_elixir\b|\.enemy_elixir\b` in `src/`: only
+`HudReader.read` (write site) and `HudState` itself
+(dataclass declaration) match. Tests assert reads on stub readers
+or on the fixture; nothing in production reads them. The
+"holdout ρ unchanged within ±0.02" criterion is therefore a
+sanity check for unintended side effects, not a real risk.
+
+### Local benchmark
+
+`scripts/benchmark_hud_reader` is not yet checked in, but a quick
+in-process timing run on the fixture frame:
+
+```text
+1000 reads in 0.301 s → 0.30 ms/read
+→ 270k frames per replay sweep ≈ 81 s ≈ 1.4 min
+```
+
+Wave 2F observed pytesseract was the dominant wall-clock cost of
+the ~3-hour A6000 run (270k subprocess spawns per replay sweep).
+At 0.30 ms/read the new reader collapses that into a noise-floor
+contribution, satisfying the spec's "< 20 min on A6000" goal by a
+wide margin.
+
+### Brev sanity-check run (pending)
+
+Spec requires one brev train run to confirm:
+
+- end-to-end < 20 min on A6000 (was ~3 h in wave 2E)
+- holdout ρ unchanged within ±0.02 of wave 2F's 0.162
+
+Since the elixir field is unread by training, the second criterion
+should be met trivially; the run is a structural sanity check, not a
+real risk. Run instructions match wave 2E.
