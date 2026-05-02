@@ -4,10 +4,12 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import cast
 
+import numpy as np
 import pytest
 
 from crpod.dataset import huggingface as hf
 from crpod.detection.yolo import Detection, YoloDetector
+from crpod.types import HudState
 
 
 def _det(frame: int, cls: str, x: float, y: float) -> Detection:
@@ -93,3 +95,87 @@ def test_parquet_to_replay_preserves_katacr_mapping(silenced_decode: None) -> No
         f"expected exactly 1 'log' CardPlay (KATACR mapping + tracker collapse), "
         f"got {len(log_plays)}: {[p.card for p in replay.plays]}"
     )
+
+
+class _StubHudReader:
+    """Records every call and returns a canned `HudState` with princess-HP fields populated.
+
+    Lets the unit test assert that `_parquet_to_replay` runs HUD OCR over the
+    same decoded frames it feeds to YOLO, without spinning up tesseract.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[int] = []
+
+    def read(self, frame_idx: int, frame: np.ndarray) -> HudState:
+        self.calls.append(frame_idx)
+        return HudState(
+            frame=frame_idx,
+            friendly_elixir=5.0,
+            enemy_elixir=4.0,
+            friendly_left_princess_hp=2800,
+            friendly_right_princess_hp=2800,
+            enemy_left_princess_hp=2700,
+            enemy_right_princess_hp=2700,
+        )
+
+
+def test_parquet_to_replay_populates_hud(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`_parquet_to_replay` must run `HudReader.read` per decoded frame and
+    populate `Replay.hud`. Regression for the wave-2A scoping miss where the
+    HF loader returned `Replay(..., hud=[])` and dropped 100% of training rows.
+    """
+    fake_frames = [(i, np.zeros((960, 540, 3), dtype=np.uint8)) for i in range(4)]
+    monkeypatch.setattr(hf, "_decode_frames", lambda path: iter(fake_frames))
+    stub_reader = _StubHudReader()
+    monkeypatch.setattr(hf, "HudReader", lambda: stub_reader)
+
+    detector = _StubDetector([_det(i, "knight", x=200, y=400) for i in range(4)])
+
+    replay = hf._parquet_to_replay(
+        Path("ignored.parquet"),
+        arena="arena_15",
+        replay_id="r1",
+        detector=cast(YoloDetector, detector),
+    )
+
+    assert len(replay.hud) == len(fake_frames), (
+        f"expected one HudState per decoded frame, got {len(replay.hud)}"
+    )
+    assert stub_reader.calls == [0, 1, 2, 3], (
+        f"HudReader.read called with unexpected frame ids: {stub_reader.calls}"
+    )
+    first = replay.hud[0]
+    assert first.friendly_left_princess_hp == 2800
+    assert first.enemy_left_princess_hp == 2700
+
+
+def test_parquet_to_replay_swallows_hud_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A single bad HUD frame must not kill the whole replay — mirror the
+    OCR-failure swallow already in `analyze_video`. The unreadable frame
+    falls back to a `HudState` with `enemy_elixir=None` so wave-2A's
+    drop-on-None policy applies per-interaction, not per-replay.
+    """
+    fake_frames = [(i, np.zeros((960, 540, 3), dtype=np.uint8)) for i in range(3)]
+    monkeypatch.setattr(hf, "_decode_frames", lambda path: iter(fake_frames))
+
+    class _FlakyReader:
+        def read(self, frame_idx: int, frame: np.ndarray) -> HudState:
+            if frame_idx == 1:
+                raise RuntimeError("tesseract exploded")
+            return HudState(frame=frame_idx, friendly_elixir=3.0, enemy_elixir=2.0)
+
+    monkeypatch.setattr(hf, "HudReader", _FlakyReader)
+    detector = _StubDetector([])
+
+    replay = hf._parquet_to_replay(
+        Path("ignored.parquet"),
+        arena="arena_15",
+        replay_id="r1",
+        detector=cast(YoloDetector, detector),
+    )
+
+    assert len(replay.hud) == 3
+    assert replay.hud[1].enemy_elixir is None, "fallback HudState should signal unreadable"
+    assert replay.hud[0].enemy_elixir == 2.0
+    assert replay.hud[2].enemy_elixir == 2.0

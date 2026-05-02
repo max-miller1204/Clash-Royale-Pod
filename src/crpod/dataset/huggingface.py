@@ -16,6 +16,8 @@ if you find it.
 
 from __future__ import annotations
 
+import sys
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,8 +26,9 @@ import numpy as np
 
 from crpod.detection.cards import to_card_play
 from crpod.detection.yolo import YoloDetector
+from crpod.ocr.hud import HudReader
 from crpod.tracking.bytetrack import Tracker
-from crpod.types import CardPlay, Replay
+from crpod.types import CardPlay, HudState, Replay
 
 DATASET_ID = "chrisrca/clash-royale-tv-replays"
 
@@ -106,7 +109,33 @@ def _decode_frames(path: Path) -> Iterator[tuple[int, np.ndarray]]:
 
 
 def _parquet_to_replay(path: Path, arena: str, replay_id: str, detector: YoloDetector) -> Replay:
-    detections = list(detector.infer(_decode_frames(path)))
+    # Materialize frames once so we can feed the same decoded BGR ndarrays
+    # to both YOLO detection and HUD OCR. HF replays are short — fits in RAM.
+    frames: list[tuple[int, np.ndarray]] = list(_decode_frames(path))
+    detections = list(detector.infer(frames))
+
+    hud_reader = HudReader()
+    hud_states: list[HudState] = []
+    total_decoded = len(frames)
+    progress_every = max(1, total_decoded // 20)  # ~5%
+    last_log_wall = time.monotonic()
+    ocr_failures = 0
+    for processed, (frame_id, bgr) in enumerate(frames, start=1):
+        try:
+            hud_states.append(hud_reader.read(frame_id, bgr))
+        except Exception:
+            ocr_failures += 1
+            hud_states.append(HudState(frame=frame_id, friendly_elixir=0.0, enemy_elixir=None))
+        now = time.monotonic()
+        if processed % progress_every == 0 or now - last_log_wall >= 15.0:
+            ocr_pct = int(round(100 * ocr_failures / processed))
+            print(
+                f"[crpod-hf] {replay_id} hud={processed}/{total_decoded} ocr_fail={ocr_pct}%",
+                file=sys.stderr,
+                flush=True,
+            )
+            last_log_wall = now
+
     tracker = Tracker(frame_rate=10)
     tracks = tracker.update(detections)
     plays: list[CardPlay] = []
@@ -124,7 +153,7 @@ def _parquet_to_replay(path: Path, arena: str, replay_id: str, detector: YoloDet
         replay_id=replay_id,
         arena=arena,
         plays=plays,
-        hud=[],
+        hud=hud_states,
         total_frames=total_frames,
         fps=10.0,
     )
