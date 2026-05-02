@@ -398,12 +398,14 @@ numbers: H100 mean 1.3%, never above 41%, only 3.2% of samples ≥10%.
 The 3 h 16 m wall-clock at ~$4/hr was burned on starting up tesseract
 ~270 000 times, not on YOLO inference (which finishes in seconds).
 
-The next-best workload-fit lesson, with hard data: the H100 was a
-~5× cost premium over A6000 for **no** wall-clock improvement. Wave 2E
-on A6000 took 1 h 38 m for 30 replays (≈ 3.27 min/replay); wave 2F
-on H100 took 3 h 16 m for 76 replays (≈ 2.58 min/replay). The H100
-gain of 0.7 min/replay (≈ 21 %) is dominated by the per-replay startup,
-not GPU compute, and would not justify the cost premium on its own.
+The next-best workload-fit lesson, with hard data: the H100 bought
+us a **21 % per-replay speedup at a ~5× cost premium**, which is a bad
+trade. Wave 2E on A6000 took 1 h 38 m for 30 replays (≈ 3.27 min/replay);
+wave 2F on H100 took 3 h 16 m for 76 replays (≈ 2.58 min/replay).
+The 0.7 min/replay gain is consistent with slightly faster YOLO
+inference (the only GPU-bound path), but per-replay wall-clock is
+dominated by the single-thread CPU OCR loop, so the GPU upgrade
+hits a diminishing-return ceiling.
 
 The actionable lesson — replace the pytesseract elixir read with
 numpy pixel sampling (the wave 2E HP-bar approach) — is a separate
@@ -452,9 +454,10 @@ dead-on-arrival. The full-run drop rate held at 33 % (wave 2E was 34 %)
 which means expanding the cohort didn't degrade HUD readability.
 
 The signal is real but weak. A 0.16 Spearman on a 189-row holdout is
-about 1.5 standard errors above zero — well above the user's stop
-threshold but not yet "trustworthy enough for a blunder rule on its
-own". Future-wave moves the data points to: (1) replace the pytesseract
+about 2.2 standard errors above zero (`SE(ρ) ≈ 1/√188 ≈ 0.073` under
+the null; `0.162 / 0.073 ≈ 2.2`, two-sided p ≈ 0.03) — well above the
+user's stop threshold but not yet "trustworthy enough for a blunder
+rule on its own". Future-wave moves the data points to: (1) replace the pytesseract
 elixir reader so iteration is cheap (separate wave, ~10× speedup,
 no model change); (2) add cross-arena replays (the 76 cap was the
 arena_15 ceiling); (3) richer features once the iteration loop is
