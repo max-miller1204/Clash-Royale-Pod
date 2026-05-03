@@ -35,6 +35,28 @@ def _interaction(card: str, frame: int) -> Interaction:
     )
 
 
+def _interaction_with_start_hp(
+    *,
+    sfl: int | None,
+    sfr: int | None,
+    sel: int | None,
+    ser: int | None,
+) -> Interaction:
+    play = CardPlay(frame=10, card="knight", x=270, y=480, side=Side.FRIENDLY)
+    return Interaction(
+        start_frame=10,
+        end_frame=40,
+        friendly_plays=(play,),
+        enemy_plays=(),
+        friendly_elixir_spent=play.elixir_cost,
+        enemy_elixir_spent=0,
+        start_friendly_left_princess_hp=sfl,
+        start_friendly_right_princess_hp=sfr,
+        start_enemy_left_princess_hp=sel,
+        start_enemy_right_princess_hp=ser,
+    )
+
+
 def test_compute_per_card_stats_excludes_low_sample_cards() -> None:
     interactions = [_interaction("knight", i) for i in range(5)] + [
         _interaction("musketeer", 100),
@@ -67,6 +89,44 @@ def test_compute_per_card_stats_skips_empty_friendly_plays() -> None:
 
     assert "knight" in stats
     assert stats["knight"][0] == pytest.approx(3.0)
+
+
+def test_interaction_features_emits_start_hp_keys() -> None:
+    """Wave 2F: HP-context fields appear in the feature row with int values
+    when both per-tower start HPs are readable."""
+    interaction = _interaction_with_start_hp(sfl=2599, sfr=3108, sel=2272, ser=2474)
+
+    row = interaction_features(interaction)
+
+    assert row["start_friendly_total_princess_hp"] == 2599 + 3108
+    assert row["start_enemy_total_princess_hp"] == 2272 + 2474
+    assert isinstance(row["start_friendly_total_princess_hp"], int)
+    assert isinstance(row["start_enemy_total_princess_hp"], int)
+
+
+def test_interaction_features_start_hp_none_when_unreadable() -> None:
+    """Wave 2F: a per-tower `None` collapses the side total to `None` so
+    LightGBM sees a missing-value signal rather than a fabricated number."""
+    interaction = _interaction_with_start_hp(sfl=2599, sfr=None, sel=None, ser=2474)
+
+    row = interaction_features(interaction)
+
+    assert row["start_friendly_total_princess_hp"] is None
+    assert row["start_enemy_total_princess_hp"] is None
+
+
+def test_interaction_features_start_hp_defaults_to_none() -> None:
+    """Wave 2F: existing call sites that pass no HUD (so start-HP fields
+    fall back to their dataclass defaults) still get well-formed feature
+    rows — the new keys just carry `None`."""
+    interaction = _interaction("knight", 10)
+
+    row = interaction_features(interaction)
+
+    assert "start_friendly_total_princess_hp" in row
+    assert "start_enemy_total_princess_hp" in row
+    assert row["start_friendly_total_princess_hp"] is None
+    assert row["start_enemy_total_princess_hp"] is None
 
 
 def test_save_load_round_trip(tmp_path: Path) -> None:
