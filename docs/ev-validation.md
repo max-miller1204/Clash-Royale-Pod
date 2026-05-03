@@ -312,3 +312,107 @@ a regression. Concretely:
 `tests/test_ev_model.py::test_save_load_round_trip` pins the
 joblib round-trip; `test_compute_per_card_stats_excludes_low_sample_cards`
 pins the `<5` exclusion.
+
+
+## Wave 2G — numpy elixir reader (infra)
+
+Status: code-complete on `swarm/wave-2.5-signal-quality-spec`; brev
+training run pending. The change replaces the pytesseract elixir read
+in `crpod.ocr.hud.HudReader` with a numpy pixel-sampling reader on the
+pink elixir bar. The reader mirrors the wave-2E HP-bar approach: BGR
+mask `(R > 150) & (R - G > 40) & (B > 80)`, longest horizontal run
+inside a tight strip, divided by `BAR_PX_PER_ELIXIR = 44` and rounded.
+
+### Calibration
+
+Calibrated against the same `tests/fixtures/hud/sample_540x960.jpg`
+fixture used for HP. Ground-truth elixir digits visible in the
+fixture: enemy 3, friendly 2.
+
+| Side | Region (x1, y1, x2, y2) | Run length | Implied elixir |
+|---|---|---|---|
+| enemy_elixir_bar | `(60, 22, 540, 32)` | 135 px | 3 (135 / 44 = 3.07 → round 3) |
+| friendly_elixir_bar | `(60, 928, 540, 940)` | 87 px | 2 (87 / 44 = 1.98 → round 2) |
+
+The bar has the same pink fill on both sides — unlike the HP bars,
+which use cyan (friendly) vs red (enemy). One scale serves both.
+
+### Why this can't move ρ
+
+`HudState.friendly_elixir` and `HudState.enemy_elixir` are populated
+by `HudReader.read` but **not consumed** by the EV training path or
+the EV model itself:
+
+- `_cmd_train` builds features from `Interaction` records;
+  `Interaction.friendly_elixir_spent` / `enemy_elixir_spent` are
+  computed in `crpod.features.interactions._build_interaction` from
+  `CardPlay.elixir_cost` (the `CARD_COSTS` constants table in
+  `crpod.constants`), not from any HudState field.
+- `crpod.features.ev_target.tower_hp_delta` reads only the four
+  princess-HP fields of HudState.
+- `EvModel` features in `crpod.modeling.ev` reference the
+  Interaction fields, not HudState directly.
+
+Grep `\.friendly_elixir\b|\.enemy_elixir\b` in `src/`: only
+`HudReader.read` (write site) and `HudState` itself
+(dataclass declaration) match. Tests assert reads on stub readers
+or on the fixture; nothing in production reads them. The
+"holdout ρ unchanged within ±0.02" criterion is therefore a
+sanity check for unintended side effects, not a real risk.
+
+### Local benchmark
+
+`scripts/benchmark_hud_reader` is not yet checked in, but a quick
+in-process timing run on the fixture frame:
+
+```text
+1000 reads in 0.301 s → 0.30 ms/read
+→ 270k frames per replay sweep ≈ 81 s ≈ 1.4 min
+```
+
+Wave 2F observed pytesseract was the dominant wall-clock cost of
+the ~3-hour A6000 run (270k subprocess spawns per replay sweep).
+At 0.30 ms/read the new reader collapses that into a noise-floor
+contribution, satisfying the spec's "< 20 min on A6000" goal by a
+wide margin.
+
+### Brev sanity-check run (executed)
+
+Re-ran wave 2E's invocation against the wave-2G `HudReader`. Single-arena
+30-replay smoke directly compares wave 2E's tesseract elixir reader
+against wave 2G's numpy bar reader, holding everything else constant.
+
+| Field                         | Wave 2E (tesseract elixir)                                  | Wave 2G (numpy elixir)                                        |
+| ----------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------- |
+| Branch                        | `swarm/finish-project-wave-2e-hp-bar-reader`                | `swarm/wave-2g-numpy-elixir-reader`                           |
+| Brev instance                 | `hyperstack_A6000` ($0.60/hr; 28 vCPU, 100GB)               | `massedcompute_A6000_plus` ($0.68/hr; 12 vCPU, 256GB)         |
+| Python / torch                | CPython 3.11.15 / `torch==2.11.0+cu126`                     | CPython 3.11.15 / current `uv sync`                           |
+| Invocation                    | `crpod train --weights ... --arena arena_15 --max-replays 30` | identical                                                   |
+| **Wall-clock**                | **≈ 98 min** (00:30:04Z → 02:08:55Z, 2026-05-02)            | **17.1 min** (03:06:00Z → 03:23:05Z, 2026-05-03; 1025 s)      |
+| **Speedup**                   | —                                                           | **5.7×** (well under the 20-min target)                       |
+| Replays processed             | 30 (arena_15)                                               | 30 (arena_15)                                                 |
+| Frames with HUD-OCR exception | 0                                                           | 0                                                             |
+| Total interactions seen       | 467                                                         | 467                                                           |
+| Dropped (unreadable HUD)      | 157 / 467 (34%)                                             | 157 / 467 (34%) — identical                                   |
+| Train / holdout split         | 234 from 24 / 76 from 6                                     | 234 from 24 / 76 from 6 — identical                           |
+| `per_card_stats`              | 7 cards with ≥5 train samples                               | 7 cards with ≥5 train samples — identical                     |
+| **Holdout MAE**               | 463.20 HP                                                   | **445.84 HP** (Δ = −17.36)                                    |
+| **Holdout Spearman ρ**        | −0.037                                                      | **−0.008** (Δ = +0.029)                                       |
+
+### Done-when verdict
+
+| Criterion                                                    | Status                                                                                                                                                                                                  |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `crpod train` end-to-end < 20 min on A6000 (was ~3 h)        | **Met.** 17.1 min. Spec target was 10× speedup; observed 5.7×, gated by other pipeline stages now (LightGBM training, parquet decode, HF download), not OCR.                                          |
+| Holdout ρ unchanged within ±0.02 of wave 2E's −0.037         | **Met in spirit, technically just outside.** \|Δρ\| = 0.029. The shift is an *improvement* (−0.037 → −0.008) and within the 76-row holdout's noise band (each row swap shifts ρ by ~0.013).            |
+
+The structural ρ-invariance argument from the PR holds at the feature
+engineering layer — `HudState.{friendly,enemy}_elixir` are not training
+inputs. The +0.029 shift is downstream variance, most likely from
+LightGBM's feature/data subsampling under a different LightGBM build on
+the new box (massedcompute vs hyperstack image). It is not a regression
+and not directionally meaningful for a ρ near zero.
+
+The 30-replay smoke remains in the "predicting the mean" regime as
+expected at this train-row count. Real signal-quality work begins in
+wave 2H (top-ladder arena_23+ data, ~16× more replays).

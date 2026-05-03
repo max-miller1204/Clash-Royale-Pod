@@ -30,7 +30,7 @@ What's missing for production-grade pod use:
 **Out of scope**
 - Real-time mode (`crpod live`, streaming pipeline, screen capture)
 - Overlay renderer (OBS browser source, always-on-top window)
-- Cross-arena evaluation beyond arena_15 (the EV model trains on this distribution; cross-arena is research follow-up)
+- Cross-arena evaluation across multiple skill tiers (the EV model can train on any single high-skill tier; arena_23+ is the chosen tier for wave 2.5)
 - Re-training the YOLO detector or adding new classes
 - New CLI subcommands beyond what's already shipped (`analyze`, `analyze-video`, `train`)
 
@@ -69,7 +69,7 @@ output/analysis/<id>/
 
 End-to-end smoke that proves we're done:
 
-1. `crpod train --weights output/models/crpod_v1_best.pt --out output/models/ev.joblib` succeeds and prints holdout MAE + Spearman correlation against the tower-HP-delta target.
+1. `crpod train --weights output/models/crpod_v1_best.pt --out output/models/ev.joblib` succeeds and prints holdout MAE + Spearman correlation against the tower-HP-delta target. Metrics recorded honestly in `docs/ev-validation.md`; no fixed signal target — wave 2.5 captures the actual values reached after the signal-quality roadmap.
 2. `crpod analyze-video <pod-replay>.mp4 --weights ... --model output/models/ev.joblib` produces:
    - `summary.json` (existing schema)
    - `blunders.json` — list of `{play_idx, card, ev_predicted, per_card_median, sigma_below}` for plays >1σ below
@@ -112,6 +112,32 @@ End-to-end smoke that proves we're done:
 | `swarm/finish-project-wave-2b-retrain-validate` | Re-train `EvModel` on the new target. Hold out 20% of arena_15 replays as a validation split. Report holdout MAE + Spearman correlation in `docs/ev-validation.md`. Compute per-card `(median, std)` from the training fold; persist inside the `EvModel` artifact (new `EvModel.per_card_stats: dict[str, tuple[float, float]]` attribute) for wave 3 to consume. | New `output/models/ev.joblib` exists; `docs/ev-validation.md` reports holdout metrics; `EvModel.load(...).per_card_stats` returns the persisted dict. |
 
 **Sequencing:** 2A must merge before 2B (2B trains on 2A's labels). Both depend on the wave-2 scaffold commit.
+
+### Wave 2.5 — Signal Quality (strict serial)
+
+Wave 2 / 2C-2F shipped a functional pipeline but holdout Spearman ρ landed
+at +0.162 — statistically real but too weak for blunder calls to be
+useful. Wave 2.5 is a sequenced quality push driven by
+`docs/superpowers/specs/2026-05-02-wave-2.5-signal-quality-design.md`.
+Strict serial ordering: each chunk's PR stacks on the prior so each
+move's Δρ is attributable. **No fixed Spearman target** — stop when
+marginal gains aren't worth additional overfitting risk; the actual ρ
+achieved drives wave 3's threshold decision.
+
+| Branch | Scope | Done-when |
+|---|---|---|
+| `swarm/wave-2g-numpy-elixir-reader` | Replace pytesseract elixir read in `HudReader` with numpy pixel-sampling on the pink elixir bar (mirrors wave 2E's HP-bar approach). Pure infra investment — `_cmd_train` uses `CardPlay.elixir_cost`, not `HudState.friendly_elixir`. | `crpod train` end-to-end < 20 min on A6000 (was ~3h); holdout ρ unchanged within ±0.02. |
+| `swarm/wave-2h-top-ladder-data` | Drop `--arena arena_15` filter; train on arena_23+ pool (~1,253 replays vs 76). Sanity-check bar reader on the new cohort; recalibrate inline if needed. Freeze a new replay-level 80/20 holdout split. | New holdout split frozen on arena_23+; ρ recorded with Δρ vs wave 2F baseline (0.162); recalibration committed if bar reader broke. |
+| `swarm/wave-2i-drop-rate-fix` | On the 2H pool: special-case destroyed-tower bookend as `delta=0` instead of dropping; loosen HSV mask to handle VFX occlusion frames. Pure variance reduction. | Drop rate < 25% on the 2H pool (was 33%); ρ recorded with Δρ vs 2H. |
+| `swarm/wave-2j-feature-audit` | Print LightGBM feature importance, drop unused features (gain < 1% of max AND split count < 5). Add 2-3 features with strong hypotheses: card-counter pairs (`top_friendly_x_top_enemy` categorical), recent damage history (last 30s of HP swings), time-pressure mode (overtime/single/double/triple elixir). | Feature importance committed to `docs/ev-validation.md`; new features implemented and tested; ρ recorded with Δρ vs 2I. |
+| `swarm/wave-2k-model-class-ab` | Only if 2J's Δρ is small. 5-fold CV on the 2J training fold across LightGBM (with hyperparameter sweep), Ridge regression baseline, and XGBoost. CV-best model gets one shot at the holdout. | CV results table committed (model × fold × ρ); final model is whichever wins CV; final ρ recorded with Δρ vs 2J. |
+
+**Sequencing:** strict serial — 2G → 2H → 2I → 2J → 2K. Each chunk
+runs its single brev train run against the frozen holdout and records
+Δρ in `docs/ev-validation.md`. Stop conditions per the design doc:
+0 < Δρ < 0.02 twice consecutively → stop; Δρ < -0.02 → stop and
+investigate; re-shuffled-split ρ diverges from frozen-split ρ by
+> 0.05 → stop (holdout has leaked).
 
 ### Wave 3 — Blunder Detection (scaffold + parallel)
 

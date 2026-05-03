@@ -1,22 +1,18 @@
-"""HUD reading: tesseract for elixir, HP-bar pixel sampling for tower HP.
+"""HUD reading via numpy pixel sampling.
 
-The princess-tower HP digits are rendered in a stylised in-game font that
-tesseract 4.1.1 cannot read (wave 2D smoke: 0/583 frames had all four
-princess HPs readable). This module switched to graphical bar-fill
-sampling for the four princess-HP fields — a horizontal strip of bright
-cyan-blue (friendly) or pink-red (enemy) whose pixel length tracks HP.
-Elixir continues to use tesseract because the elixir digit is a clean
-white glyph on a flat purple background and reads reliably.
+All four princess HP bars and both elixir counters are read from
+horizontal-fill bands using BGR colour masks plus a longest-run scan —
+no tesseract subprocess. Wave 2G dropped the tesseract elixir read
+because it was the wall-clock bottleneck for training (~270k subprocess
+spawns per replay sweep). The princess-HP digits had already moved off
+tesseract in wave 2E (the in-game digit font is unreadable to tesseract
+4.1.1).
 """
 
 from __future__ import annotations
 
-import contextlib
-import os
-import tempfile
 from dataclasses import dataclass
 
-import cv2
 import numpy as np
 
 from crpod.types import HudState
@@ -36,6 +32,16 @@ ENEMY_HP_PER_BAR_PX = 50.5
 # a stray VFX flash in a non-tower region) at ~25% above that threshold.
 MAX_PLAUSIBLE_BAR_PX = 75
 
+# Elixir bar calibration (same fixture frame). The elixir bar is the
+# horizontal pink/magenta strip running across the top (enemy) and bottom
+# (friendly) edges of the HUD. Same colour both sides.
+#   friendly bar 2 elixir → 87 bar pixels (in the 2-pixel-tall sample band)
+#   enemy bar    3 elixir → 135 bar pixels
+# Both round-trip cleanly at ~44 px per elixir. The bar fills smoothly so
+# round() of `run / 44` recovers the integer elixir reading the digit
+# overlay would show.
+BAR_PX_PER_ELIXIR = 44.0
+
 
 @dataclass(frozen=True)
 class HudRegions:
@@ -46,8 +52,6 @@ class HudRegions:
     different source.
     """
 
-    enemy_elixir: tuple[int, int, int, int] = (15, 10, 65, 50)
-    friendly_elixir: tuple[int, int, int, int] = (15, 900, 65, 945)
     timer: tuple[int, int, int, int] = (450, 140, 540, 180)
     enemy_tower_left: tuple[int, int, int, int] = (60, 240, 180, 275)
     enemy_tower_right: tuple[int, int, int, int] = (360, 240, 480, 275)
@@ -65,24 +69,22 @@ class HudRegions:
     friendly_right_hp_bar: tuple[int, int, int, int] = (360, 683, 480, 690)
     enemy_left_hp_bar: tuple[int, int, int, int] = (60, 263, 180, 270)
     enemy_right_hp_bar: tuple[int, int, int, int] = (360, 263, 480, 270)
+    # Elixir-bar pixel-sampling rects. x starts at 60 to skip the rounded
+    # digit badge on the left edge (which is the same pink colour as the
+    # bar fill); the bar itself extends right of the badge to roughly the
+    # full HUD width. The y band is tight on the bright fill strip in the
+    # top/bottom HUD edges.
+    enemy_elixir_bar: tuple[int, int, int, int] = (60, 22, 540, 32)
+    friendly_elixir_bar: tuple[int, int, int, int] = (60, 928, 540, 940)
 
 
 class HudReader:
     def __init__(self, regions: HudRegions | None = None) -> None:
         self.regions = regions or HudRegions()
-        self._pytesseract = None
-
-    def _lazy_load(self) -> None:
-        if self._pytesseract is not None:
-            return
-        import pytesseract
-
-        self._pytesseract = pytesseract
 
     def read(self, frame_idx: int, frame: np.ndarray) -> HudState:
-        self._lazy_load()
-        friendly_elixir = self._read_number(frame, self.regions.friendly_elixir)
-        enemy_elixir = self._read_number(frame, self.regions.enemy_elixir)
+        friendly_elixir = self._read_elixir_bar(frame, self.regions.friendly_elixir_bar)
+        enemy_elixir = self._read_elixir_bar(frame, self.regions.enemy_elixir_bar)
         friendly_left = self._read_hp_bar(frame, self.regions.friendly_left_hp_bar, "friendly")
         friendly_right = self._read_hp_bar(frame, self.regions.friendly_right_hp_bar, "friendly")
         enemy_left = self._read_hp_bar(frame, self.regions.enemy_left_hp_bar, "enemy")
@@ -98,32 +100,6 @@ class HudReader:
             enemy_left_princess_hp=enemy_left,
             enemy_right_princess_hp=enemy_right,
         )
-
-    def _read_number(self, frame: np.ndarray, region: tuple[int, int, int, int]) -> int | None:
-        assert self._pytesseract is not None
-        x1, y1, x2, y2 = region
-        crop = frame[y1:y2, x1:x2]
-        # The HUD digits are ~20px tall at 540x960 — upscale before OCR so
-        # Tesseract's feature extractor has enough resolution to work with.
-        upscaled = cv2.resize(crop, None, fx=6, fy=6, interpolation=cv2.INTER_CUBIC)
-        # Pass a realpath-resolved file path rather than a numpy array: the
-        # nix-built tesseract on macOS can't follow the /tmp -> /private/tmp
-        # symlink that pytesseract's default tempfile flow lands on.
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            tmp_path = f.name
-        try:
-            cv2.imwrite(tmp_path, upscaled)
-            txt = self._pytesseract.image_to_string(
-                os.path.realpath(tmp_path),
-                config="--psm 7 -c tessedit_char_whitelist=0123456789",
-            ).strip()
-        finally:
-            with contextlib.suppress(FileNotFoundError):
-                os.unlink(tmp_path)
-        try:
-            return int(txt) if txt else None
-        except ValueError:
-            return None
 
     def _read_hp_bar(
         self, frame: np.ndarray, region: tuple[int, int, int, int], side: str
@@ -161,22 +137,57 @@ class HudReader:
             return None
         return round(run * scale)
 
+    def _read_elixir_bar(self, frame: np.ndarray, region: tuple[int, int, int, int]) -> int | None:
+        """Sample the bright pink elixir bar.
+
+        Returns the integer elixir reading (0..10) the digit overlay would
+        show, or `None` for a fully empty bar so the HF loader can flag the
+        frame as unreadable. The mask matches the bar's pink/magenta fill
+        (R dominant over G, B noticeably present — distinguishes from the
+        red HP-bar fill which has B near zero).
+        """
+        x1, y1, x2, y2 = region
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0:
+            return None
+        b = crop[..., 0].astype(np.int32)
+        g = crop[..., 1].astype(np.int32)
+        r = crop[..., 2].astype(np.int32)
+        # Pink/magenta fill: R bright, much above G, with significant B
+        # content (the b > 80 floor is what separates this from the red
+        # HP-bar fill, which has B near zero).
+        mask = (r > 150) & (r - g > 40) & (b > 80)
+        run = _longest_horizontal_run(mask)
+        if run == 0:
+            return None
+        elixir = round(run / BAR_PX_PER_ELIXIR)
+        # Clamp to the in-game elixir cap; a run wider than ~10 elixir is
+        # a calibration error, not a real reading.
+        if elixir > 10:
+            return 10
+        return elixir
+
 
 def _longest_horizontal_run(mask: np.ndarray) -> int:
     """Longest run of True values along the last axis, max over rows.
 
-    Pure-Python loop because the rect is tiny (~120×7 ≈ 840 cells).
+    Vectorised via an edge-diff over each row (concat-pad with zeros so
+    runs touching the edges are detected). The fallback for an all-False
+    row is 0; the fallback for an empty mask is 0.
     """
     if mask.size == 0:
         return 0
     best = 0
     for row in mask:
-        run = 0
-        for v in row:
-            if v:
-                run += 1
-                if run > best:
-                    best = run
-            else:
-                run = 0
+        # Find rising and falling edges in the row by diffing a 0-padded
+        # int8 view. starts = idx where 0→1; ends = idx where 1→0.
+        padded = np.concatenate(([0], row.astype(np.int8), [0]))
+        diff = np.diff(padded)
+        starts = np.where(diff == 1)[0]
+        ends = np.where(diff == -1)[0]
+        if starts.size == 0:
+            continue
+        run = int((ends - starts).max())
+        if run > best:
+            best = run
     return best
