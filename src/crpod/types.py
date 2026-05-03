@@ -78,6 +78,14 @@ class Interaction:
     # Value sign convention: end_hp - start_hp (negative = HP lost).
     # `None` for any tower whose start- or end-frame HUD reading was unreadable.
     tower_hp_delta: dict[str, int | None] = field(default_factory=dict)
+    # Absolute princess HP at the start-frame HUD bookend, per tower. `None`
+    # for towers whose start-frame reading was unreadable. Wave 2F additive
+    # context for the EV feature builder; pre-2F call sites that don't pass
+    # HUD continue to leave these unset.
+    start_friendly_left_princess_hp: int | None = None
+    start_friendly_right_princess_hp: int | None = None
+    start_enemy_left_princess_hp: int | None = None
+    start_enemy_right_princess_hp: int | None = None
 
     @property
     def elixir_trade(self) -> int:

@@ -17,6 +17,17 @@ from crpod.features.placement import zone_of
 from crpod.types import Interaction
 
 
+def _start_total_princess_hp(left: int | None, right: int | None) -> int | None:
+    """Sum two start-frame princess HP readings; `None` if either is unreadable.
+
+    Used by `interaction_features` to expose the wave-2F HP-context features
+    without leaking the per-tower granularity into the feature row.
+    """
+    if left is None or right is None:
+        return None
+    return left + right
+
+
 def interaction_features(interaction: Interaction) -> dict[str, Any]:
     """Flatten an Interaction into a feature row."""
     friendly_cards = [p.card for p in interaction.friendly_plays]
@@ -32,6 +43,18 @@ def interaction_features(interaction: Interaction) -> dict[str, Any]:
         "enemy_cards": ",".join(enemy_cards),
         "friendly_zones": ",".join(zones),
         "duration_frames": interaction.end_frame - interaction.start_frame,
+        # Wave 2F: HP-context features. Encode match phase + remaining HP
+        # capacity at the moment the play happens. `None` when either tower's
+        # start-frame HUD reading was unreadable; LightGBM treats NaN as a
+        # missing-value signal during splits.
+        "start_friendly_total_princess_hp": _start_total_princess_hp(
+            interaction.start_friendly_left_princess_hp,
+            interaction.start_friendly_right_princess_hp,
+        ),
+        "start_enemy_total_princess_hp": _start_total_princess_hp(
+            interaction.start_enemy_left_princess_hp,
+            interaction.start_enemy_right_princess_hp,
+        ),
     }
 
 

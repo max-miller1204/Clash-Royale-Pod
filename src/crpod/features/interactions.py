@@ -47,8 +47,19 @@ def build_interactions(
         enemy = tuple(p for p in bucket if p.side is Side.ENEMY)
         end_frame = max(p.frame for p in bucket)
         delta: dict[str, int | None] = {}
+        sfl: int | None = None
+        sfr: int | None = None
+        sel: int | None = None
+        ser: int | None = None
         if hud is not None:
-            delta = tower_hp_delta(_hud_window(hud, anchor.frame, end_frame))
+            hud_slice = _hud_window(hud, anchor.frame, end_frame)
+            delta = tower_hp_delta(hud_slice)
+            if hud_slice:
+                start = hud_slice[0]
+                sfl = start.friendly_left_princess_hp
+                sfr = start.friendly_right_princess_hp
+                sel = start.enemy_left_princess_hp
+                ser = start.enemy_right_princess_hp
         out.append(
             Interaction(
                 start_frame=anchor.frame,
@@ -58,6 +69,10 @@ def build_interactions(
                 friendly_elixir_spent=sum(p.elixir_cost or card_cost(p.card) for p in friendly),
                 enemy_elixir_spent=sum(p.elixir_cost or card_cost(p.card) for p in enemy),
                 tower_hp_delta=delta,
+                start_friendly_left_princess_hp=sfl,
+                start_friendly_right_princess_hp=sfr,
+                start_enemy_left_princess_hp=sel,
+                start_enemy_right_princess_hp=ser,
             )
         )
         i = j
