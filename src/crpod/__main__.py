@@ -267,7 +267,11 @@ def _cmd_train(args: argparse.Namespace) -> int:
     if args.min_arena is not None and args.min_arena < 0:
         print("error: --min-arena must be ≥ 0", file=sys.stderr)
         sys.exit(1)
-    loader = HFReplayLoader(yolo_weights=args.weights)
+    # Wave 2H: stream-delete cached parquets after each replay loads so a
+    # 1,253-replay sweep doesn't fill a 256 GB cloud disk (~800 MB per
+    # parquet × 1,253 = ~1 TB). The price is no warm cache for retries —
+    # acceptable for the once-per-chunk brev train runs.
+    loader = HFReplayLoader(yolo_weights=args.weights, delete_after_load=True)
     # Each per-replay bundle is keyed by (arena, replay_id) so the holdout
     # split can be reproduced from a committed file (`--frozen-holdout`)
     # rather than recomputed from a random shuffle on every chunk's run.
