@@ -812,3 +812,75 @@ prefix. The drop-rate fix slightly increased LightGBM fit volume
 way. Idle-time billing after `train exit` until the box was deleted
 adds a small tail to the actual invoice; running total stays under
 $10.
+
+## Wave 2J — feature audit (executed; no drops)
+
+Wave 2J is an audit-only chunk: extract LightGBM `gain` and `split`
+importances from the wave-2I model artifact and hard-drop any feature
+that satisfies **both** `gain < 1% × max(gain)` **AND** `split < 5`.
+If anything qualified, drop the keys from
+`crpod.modeling.ev.interaction_features` and re-train on brev to pin
+Δρ vs 2I (+0.194). If nothing qualified, ship the importance table
+only — `Δρ ≈ 0` a priori — no code change, no brev run.
+
+The audit ran locally against
+`output/models/ev_wave2i.joblib` via
+`scripts/audit_ev_features.py`, which loads the model with
+`EvModel.load` and reads `booster.feature_importance(importance_type=...)`.
+
+### Importance table
+
+`max(gain) = 4_990_834_911` (held by `start_enemy_total_princess_hp`).
+The "gain/max" column is each feature's gain expressed as a fraction
+of that max — the 1% line is the audit's drop threshold.
+
+| Feature                            |          Gain | Split | Gain / max |
+| ---------------------------------- | ------------: | ----: | ---------: |
+| `start_enemy_total_princess_hp`    | 4,990,834,911 | 1,210 |   100.00 % |
+| `start_friendly_total_princess_hp` | 4,308,891,863 | 1,279 |    86.34 % |
+| `friendly_zones`                   | 1,688,699,040 |   566 |    33.84 % |
+| `duration_frames`                  | 1,529,931,443 |   582 |    30.65 % |
+| `elixir_trade`                     | 1,291,689,591 |   485 |    25.88 % |
+| `enemy_cards`                      | 1,208,381,895 |   433 |    24.21 % |
+| `friendly_cards`                   | 1,156,171,110 |   380 |    23.17 % |
+| `friendly_elixir_spent`            |   992,395,727 |   369 |    19.88 % |
+| `enemy_elixir_spent`               |   746,782,346 |   326 |    14.96 % |
+| `n_enemy_cards`                    |   417,913,867 |   201 |     8.37 % |
+| `n_friendly_cards`                 |   356,304,979 |   169 |     7.14 % |
+
+### Drop list
+
+**No drops.** The weakest feature (`n_friendly_cards`) sits at
+**7.14 % × max(gain)** with **169 splits** — more than 7× the gain
+threshold and more than 30× the split threshold. Every one of the
+11 features clears both gates by a large margin, so the wave-2I model
+is using all of them in non-trivial ways. The wave-2F HP-context pair
+is dominant (the two top rows), which is consistent with the +0.116
+ρ jump landing in 2I once destroyed-tower bookends stopped dropping
+those rows wholesale.
+
+### Outcome
+
+- **Drop list:** none.
+- **Code change:** none — `interaction_features` is untouched.
+- **Brev run:** skipped per spec (no drops → Δρ N/A by definition).
+- **Δρ vs wave 2I (+0.194):** **N/A** (no model retrained).
+- **Cost:** **$0.** Audit ran locally against the existing 2.6 MB
+  joblib artifact in a few seconds.
+
+### Done-when verdict
+
+| Criterion                                             | Status                                                                                                                                                                |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Importance table committed                            | **Met.** Per-feature `gain` and `split` columns above; threshold ratio reported.                                                                                     |
+| Drop list pinned (explicit list or literal "no drops") | **Met.** "No drops" — see above. Lowest gain ratio is 7.14 %; lowest split count is 169.                                                                              |
+| If drops applied: code edits + unit test + brev run    | **N/A.** No drops, so no `interaction_features` edit, no new test, no brev train. The existing `tests/test_ev_model.py` continues to pin the feature-row contract.   |
+| If no drops: importance table + Δρ N/A stated         | **Met.** Δρ N/A explicitly noted above.                                                                                                                              |
+
+The wave-2.5 stop conditions are not in play this chunk (no model
+retrain → no new ρ → no Δρ to compare against `±0.02`). Wave 2J' is
+the natural next step: the audit confirms the 11 existing features
+are all pulling weight, so the case for **adding** signal-bearing
+features (top-card crosses, pre-window HP swings, time-pressure
+mode) is intact — there's no dead weight to displace, but there's
+also no ceiling evidence that the current feature set is saturated.
