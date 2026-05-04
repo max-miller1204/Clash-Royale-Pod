@@ -416,3 +416,99 @@ and not directionally meaningful for a ρ near zero.
 The 30-replay smoke remains in the "predicting the mean" regime as
 expected at this train-row count. Real signal-quality work begins in
 wave 2H (top-ladder arena_23+ data, ~16× more replays).
+
+## Wave 2H — top-ladder data shift (executed)
+
+The big lever. Drop the `--arena arena_15` filter and train on the
+full arena_23+ pool (1,253 replays available across arenas 23-31, vs
+30 used in wave 2G). Two new train flags ship with this chunk:
+
+- `--min-arena 23` restricts the HF replay pool to arenas with index
+  ≥ 23.
+- `--frozen-holdout docs/wave-2.5-holdout.txt` — the committed list
+  of 241 (arena, replay_id) pairs that serve as the wave-2.5 holdout
+  for chunks 2I-2K. Bootstrapped on the first run (random-shuffle
+  per `Random(0)`); later chunks read it back so Δρ comparisons stay
+  apples-to-apples.
+
+The bar reader survived the new arena cohort without recalibration —
+the smoke check on 30 arena_23+ replays gave a 22% drop rate
+(better than wave 2E's 34%, indicating the cosmetic differences in
+top-ladder HUD don't break the pink/cyan masks).
+
+A `delete_after_load=True` flag landed on `HFReplayLoader` to
+stream-delete the cached parquet after each replay. Without it, the
+1,253-replay sweep needed ~1 TB of cache; the 256 GB cloud disk
+filled at ~288 replays in. With cleanup, peak disk use stayed under
+40 GB across the whole run.
+
+### Brev run
+
+| Field                         | Value                                                                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Branch                        | `swarm/wave-2h-top-ladder-data`                                                                                                                        |
+| Brev instance                 | `massedcompute_A6000_plus` ($0.68/hr; 12 vCPU, 256GB disk)                                                                                             |
+| Python / torch                | CPython 3.11.15 venv / current `uv sync`                                                                                                               |
+| Invocation                    | `crpod train --weights ... --arena-min 23 --max-replays 1253 --frozen-holdout docs/wave-2.5-holdout.txt`                                               |
+| Wall-clock                    | **14h 7m** (10:38:24Z 2026-05-03 → 00:45:04Z 2026-05-04) — single tmux session                                                                         |
+| Replays processed             | 1,203 of 1,253 (50 fully dropped — every interaction window in those 50 had ≥1 unreadable bar bookend)                                                 |
+| Total interactions seen       | 23,662 (≈51× wave 2G's 467)                                                                                                                            |
+| Dropped (unreadable HUD)      | **4,526 / 23,662 (19%)** — better than wave 2G's 34% on the same reader. Top-ladder players keep more towers alive longer, fewer destroyed-bar drops. |
+| Train / holdout split         | **15,206 from 962 replays / 3,930 from 241 replays** (frozen-holdout bootstrap)                                                                        |
+| `per_card_stats`              | **69 cards with ≥5 train samples** (vs 7 in wave 2G — almost 10× more anchors)                                                                         |
+| **Holdout MAE**               | **335.00 HP**                                                                                                                                          |
+| **Holdout Spearman ρ**        | **+0.078**                                                                                                                                             |
+
+### Top-10 anchor cards by train-fold sample count
+
+```text
+skeletons:  n=2626 median=+0.0 std=633.6
+musketeer:  n=1912 median=+0.0 std=578.7
+cannon:     n=1117 median=+0.0 std=582.7
+tesla:      n= 919 median=+0.0 std=605.8
+ice_spirit: n= 902 median=+0.0 std=609.8
+hog_rider:  n= 721 median=+0.0 std=546.2
+goblins:    n= 621 median=+0.0 std=750.3
+ice_golem:  n= 518 median=+0.0 std=718.9
+knight:     n= 362 median=+0.0 std=557.0
+log:        n= 270 median=+0.0 std=522.0
+```
+
+Every median is `+0.0` HP — most card plays don't directly damage a
+tower in their immediate interaction window. The std (~500-750 HP)
+captures the variance, and is what wave 3's blunder rule will key
+off (`(median − ev_pred) / std > threshold`).
+
+### Done-when verdict
+
+| Criterion                                                                     | Status                                                                                                                                                                                                                                                  |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| New 80/20 replay-level holdout split frozen on the arena_23+ pool             | **Met.** `docs/wave-2.5-holdout.txt` committed (241 lines). Chunks 2I-2K consume it via `--frozen-holdout`.                                                                                                                                            |
+| ρ recorded with Δρ vs wave 2F baseline (0.162)                                | **Recorded; comparison is apples-to-oranges.** Wave 2F: ρ=0.162 on N=76 holdout (≈1.4σ above zero, marginal). Wave 2H: ρ=+0.078 on N=3,930 holdout (≈4.9σ above zero, highly significant). The wave 2H signal is **statistically much stronger** despite the smaller absolute number. |
+| Bar reader recalibration if it broke on the new cohort                        | **Not needed.** 30-replay smoke showed 22% drop rate (improved from 34%). Same reader, no new constants.                                                                                                                                                |
+
+### Why ρ went down vs wave 2F (and why that's fine)
+
+ρ is bounded by holdout noise. With N=76 a single rank-flip of a
+single row swings ρ by ~0.013, so wave 2F's 0.162 was sitting on
+≈12 random rank-flips. Wave 2H's 3,930-row holdout reduces this
+noise to ≈0.0003 per row. The actual *significance* of the
+correlation grew dramatically, even though the headline number
+shrank. For wave 3's blunder rule what matters is whether the model
+ranks plays correctly — and we now have the statistical power to
+verify that.
+
+### What this unblocks
+
+- Wave 2I (drop-rate fix) starts here. Goal: get drop rate below 25%
+  by special-casing destroyed-tower bookends and loosening the HSV
+  mask. Δρ vs this run's 0.078 is the official measure.
+- Wave 2J (feature audit) follows 2I, again with this same frozen
+  holdout.
+- Wave 2K (model class A/B) only runs if 2J's Δρ is small.
+
+### Cost
+
+Total brev wave-2H spend: **~$11.50** ($9.59 for the successful
+14h7m run + ~$2 for the disk-fill diagnostic before the
+`delete_after_load` patch landed).
