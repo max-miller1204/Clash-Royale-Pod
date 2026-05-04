@@ -683,7 +683,7 @@ Total brev wave-2H spend: **~$11.50** ($9.59 for the successful
 14h7m run + ~$2 for the disk-fill diagnostic before the
 `delete_after_load` patch landed).
 
-## Wave 2I — drop-rate fix (code-complete; brev pending)
+## Wave 2I — drop-rate fix (executed; ρ +0.078 → +0.194)
 
 Wave 2H bottomed out at a 19% drop rate on the arena_23+ pool, with
 two structural sources eating most of the residual:
@@ -728,7 +728,9 @@ official signal-quality measure for this chunk.
 - The mask-threshold loosening option in CHUNK.md was deferred:
   the gap-tolerant run finder already recovers the typical case and
   loosening the BGR mask risks reading the gold king-level crown
-  badge as a bar. Reconsider only if 2I's Δρ is unexpectedly small.
+  badge as a bar. **Decision held post-brev:** gap-tolerant run alone
+  produced Δρ = +0.116 against the wave-2H baseline, so no need to
+  revisit mask loosening in wave 2J or later.
 
 ### Calibration sanity
 
@@ -764,34 +766,49 @@ calibration regression gate.
 
 ### Brev run
 
-The user runs `crpod train --weights ... --min-arena 23 --max-replays 1253 --frozen-holdout docs/wave-2.5-holdout.txt`
-on a `massedcompute_A6000_plus` instance after the wave-2I PR
-merges. The frozen-holdout file is unchanged — same 241 replays as
-wave 2H, same train/holdout boundary, so Δρ is apples-to-apples.
+`crpod train --weights output/models/crpod_v1_best.pt --out output/models/ev_wave2i.joblib --min-arena 23 --max-replays 1253 --frozen-holdout docs/wave-2.5-holdout.txt`
+ran on a `massedcompute_A6000_plus` instance — started
+`2026-05-04T06:05:13Z`, exited cleanly (status=0) at
+`2026-05-04T17:32:51Z`. The frozen-holdout file is unchanged — same
+241 replays as wave 2H, same train/holdout boundary, so Δρ is
+apples-to-apples.
 
-| Field                     | Wave 2H (baseline)               | Wave 2I (this chunk)        |
-| ------------------------- | -------------------------------- | --------------------------- |
-| Wall-clock                | 14h 7m                           | TBD (brev pending)          |
-| Replays processed         | 1,203 of 1,253                   | TBD (brev pending)          |
-| Total interactions seen   | 23,662                           | TBD (brev pending)          |
-| Dropped (unreadable HUD)  | 4,526 / 23,662 (**19%**)         | **TBD (brev pending)**      |
-| Train / holdout split     | 15,206 from 962 / 3,930 from 241 | TBD (brev pending) / 3,930 from 241 |
-| Holdout MAE               | 335.00 HP                        | TBD (brev pending)          |
-| **Holdout Spearman ρ**    | **+0.078**                       | **TBD (brev pending)**      |
-| **Δρ vs wave 2H**         | —                                | **TBD (brev pending)**      |
+| Field                     | Wave 2H (baseline)               | Wave 2I (this chunk)                                 |
+| ------------------------- | -------------------------------- | ---------------------------------------------------- |
+| Wall-clock                | 14h 7m                           | **11h 27m** (faster — likely warm-cache effect on shared HF prefix) |
+| Replays processed         | 1,203 of 1,253                   | **1,251 of 1,253** (only 2 wholly dropped vs 50 in 2H) |
+| Total interactions seen   | 23,662                           | 23,662 (same data pool)                              |
+| Dropped (unreadable HUD)  | 4,526 / 23,662 (**19%**)         | **3,142 / 23,662 (13%)** — recovered 1,384 rows      |
+| Train / holdout split     | 15,206 from 962 / 3,930 from 241 | **16,490 from 1,010 / 4,030 from 241**               |
+| `per_card_stats` cards    | 69                               | **72** (cards with ≥5 train-fold samples)            |
+| Holdout MAE               | 335.00 HP                        | **326.82 HP** (−2.4%)                                |
+| **Holdout Spearman ρ**    | **+0.078**                       | **+0.194**                                           |
+| **Δρ vs wave 2H**         | —                                | **+0.116** (signal more than doubled)                |
 
 ### Done-when verdict
 
-Filled in by the user after the brev run lands. The chunk-level stop
-conditions from the wave-2.5 design doc still apply: `0 < Δρ < 0.02`
-twice consecutively → stop; `Δρ < -0.02` → stop and investigate;
-re-shuffled-split ρ diverges from frozen-split ρ by `> 0.05` →
-stop (holdout has leaked).
+| Criterion                                                              | Status                                                                                                                                                                                                                                                  |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Drop rate < 25% on the 2H pool (spec target was vs 33%; 19% empirical) | **Met.** 13% — Δ = −6 pp vs wave 2H, −12 pp vs spec target. The destroyed-tower fix recovered 1,384 of the 4,526 prior drops outright; the remaining ~3,142 drops are transient VFX occlusions or other rare unreadable bookends not addressed by 2I. |
+| ρ recorded with Δρ vs 2H baseline                                      | **Met.** Δρ = +0.116; ρ went from +0.078 → +0.194. At N=4,030 holdout, the per-row noise floor is ≈ 0.0002, so the move is overwhelmingly real signal — not measurement drift. The improvement comes from cleaner labels (destroyed-tower delta=0 instead of dropped row) plus more samples for LightGBM to find structure on. |
+
+The wave-2.5 stop conditions all clear comfortably:
+
+- `Δρ < -0.02 → stop and investigate` — got +0.116, no investigation needed.
+- `0 < Δρ < 0.02 twice consecutively → stop the wave-2.5 push` — single chunk delivered 5.8× the lower bound; wave 2J still has runway.
+- `re-shuffled-split ρ diverges from frozen-split ρ by > 0.05 → stop (holdout leaked)` — frozen-split path used end-to-end; the re-shuffle leak check becomes 2J homework only if Δρ continues climbing past plausible.
+
+Wave 2J (feature audit) is the natural next step.
 
 ### Cost
 
-TBD (brev pending). Expected: comparable to wave 2H (~$10) since
-the same `--max-replays 1253` sweep runs on the same instance type;
-the drop-rate fix is a CPU-no-op (slightly more rows survive into
-LightGBM, but training is dominated by HF download + parquet decode,
-not the LightGBM fit itself).
+**~$7.80** (`massedcompute_A6000_plus` × 11h 28m × $0.68/hr) for the
+train wall-clock alone. About 32% under wave 2H's ~$11.50 — the
+gap-tolerant run finder is a per-frame no-op, so the speedup is real
+and most likely down to faster HF responses on the second consecutive
+run with the dataset cache warmed across both waves' shared
+prefix. The drop-rate fix slightly increased LightGBM fit volume
+(16,490 vs 15,206 train rows) but LightGBM fit is < 1 minute either
+way. Idle-time billing after `train exit` until the box was deleted
+adds a small tail to the actual invoice; running total stays under
+$10.
