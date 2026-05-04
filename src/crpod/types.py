@@ -86,6 +86,18 @@ class Interaction:
     start_friendly_right_princess_hp: int | None = None
     start_enemy_left_princess_hp: int | None = None
     start_enemy_right_princess_hp: int | None = None
+    # Wave 2J': pre-window HP-swing context. Sum of princess-tower HP delta
+    # across the 30 s preceding the interaction's start_frame (start_HP minus
+    # lookback_HP, so negative = the side conceded HP in the lookback window).
+    # `None` when fps was not provided to build_interactions, when the lookback
+    # frame falls before the start of the replay, or when either bookend HUD
+    # read is unreadable.
+    pre_window_friendly_hp_delta_30s: int | None = None
+    pre_window_enemy_hp_delta_30s: int | None = None
+    # Wave 2J': start time in seconds, derived from start_frame / fps. Lets
+    # `interaction_features` compute time_pressure_mode without needing access
+    # to the Replay. `None` when fps was not provided.
+    start_seconds: float | None = None
 
     @property
     def elixir_trade(self) -> int:
