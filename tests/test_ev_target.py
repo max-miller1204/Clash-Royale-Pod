@@ -89,3 +89,62 @@ def test_no_damage_yields_zero_target() -> None:
         _hud(40, fl=1000, fr=1000, el=1000, er=1000),
     ]
     assert _training_target(_interaction(window)) == 0.0
+
+
+def test_destroyed_tower_window_all_none_yields_zero_delta() -> None:
+    """Wave 2I: a tower whose HUD reads None across every frame in the
+    window is treated as destroyed (princess towers don't unfaint), so
+    its delta is 0 instead of None — the interaction is no longer dropped.
+    """
+    window = [
+        _hud(0, fl=1000, fr=1000, el=None, er=1000),
+        _hud(20, fl=1000, fr=1000, el=None, er=1000),
+        _hud(40, fl=1000, fr=1000, el=None, er=1000),
+    ]
+    delta = tower_hp_delta(window)
+    assert delta["enemy_left"] == 0
+    assert delta["friendly_left"] == 0
+    assert delta["friendly_right"] == 0
+    assert delta["enemy_right"] == 0
+
+
+def test_destroyed_tower_does_not_drop_training_row() -> None:
+    """Wave 2I: a destroyed enemy tower (None-throughout) plus real damage
+    on other towers yields a valid training target reflecting the live
+    towers' deltas. Without the fix this row would drop.
+    """
+    window = [
+        _hud(0, fl=1000, fr=1000, el=None, er=1000),
+        _hud(20, fl=1000, fr=1000, el=None, er=1000),
+        _hud(40, fl=900, fr=1000, el=None, er=950),
+    ]
+    # friendly_left -100, friendly_right 0, enemy_left 0 (destroyed),
+    # enemy_right -50 → (-100 + 0) - (0 + -50) = -50.
+    assert _training_target(_interaction(window)) == -50.0
+
+
+def test_occluded_bookend_with_readable_mid_still_drops() -> None:
+    """Wave 2I: if a tower's bookend is None but the window has any frame
+    with a real read for that tower, treat it as transient occlusion (not
+    destroyed) and keep dropping the row — matches pre-2I behaviour for
+    the VFX-occlusion case which Change 2 (gap-tolerant reader) handles.
+    """
+    window = [
+        _hud(0, fl=1000, fr=1000, el=None, er=1000),
+        _hud(20, fl=1000, fr=1000, el=2000, er=1000),
+        _hud(40, fl=900, fr=1000, el=None, er=1000),
+    ]
+    assert _training_target(_interaction(window)) is None
+
+
+def test_destroyed_tower_does_not_rescue_other_towers_occlusion() -> None:
+    """Wave 2I: the destroyed-tower fix targets only the destroyed tower.
+    If another tower's bookend is occluded the row still drops — the fix
+    is selective, not a blanket loosening of the bookend rule.
+    """
+    window = [
+        _hud(0, fl=1000, fr=1000, el=None, er=1000),
+        _hud(20, fl=1000, fr=1000, el=None, er=1000),
+        _hud(40, fl=None, fr=1000, el=None, er=1000),  # friendly_left occluded at end
+    ]
+    assert _training_target(_interaction(window)) is None
