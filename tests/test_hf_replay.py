@@ -12,6 +12,27 @@ from crpod.detection.yolo import Detection, YoloDetector
 from crpod.types import HudState
 
 
+def test_unlink_blob_removes_symlink_and_underlying_blob(tmp_path: Path) -> None:
+    """Wave 2H: stream-delete must free both the snapshot symlink and the
+    blob it points to, otherwise the cache stays full."""
+    blob = tmp_path / "blobs" / "deadbeef"
+    blob.parent.mkdir()
+    blob.write_bytes(b"x" * 1024)
+    snap = tmp_path / "snapshots" / "abc" / "frames.parquet"
+    snap.parent.mkdir(parents=True)
+    snap.symlink_to(blob)
+
+    hf._unlink_blob(snap)
+
+    assert not snap.exists()
+    assert not blob.exists()
+
+
+def test_unlink_blob_swallows_missing_path(tmp_path: Path) -> None:
+    """Best-effort cleanup — a stale path must not crash the train loop."""
+    hf._unlink_blob(tmp_path / "nope.parquet")
+
+
 def _det(frame: int, cls: str, x: float, y: float) -> Detection:
     """40x60 box centered at (x, y) — large enough for ByteTrack IoU matching."""
     return Detection(

@@ -94,3 +94,25 @@ def test_train_non_positive_max_replays(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert result.stderr.startswith("error: ")
     assert "--max-replays must be > 0" in result.stderr
+
+
+def test_train_negative_min_arena(tmp_path: Path) -> None:
+    weights = tmp_path / "weights.pt"
+    weights.write_bytes(b"")
+    out = tmp_path / "model.joblib"
+
+    result = _run(
+        [
+            "train",
+            "--weights",
+            str(weights),
+            "--out",
+            str(out),
+            "--min-arena",
+            "-1",
+        ]
+    )
+
+    assert result.returncode == 1
+    assert result.stderr.startswith("error: ")
+    assert "--min-arena must be ≥ 0" in result.stderr

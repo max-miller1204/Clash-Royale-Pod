@@ -1,10 +1,11 @@
 """crpod CLI.
 
 Usage:
-    uv run crpod list-replays [--arena ARENA]
+    uv run crpod list-replays [--arena ARENA] [--min-arena N]
     uv run crpod analyze ARENA REPLAY_ID [--out DIR]
     uv run crpod analyze-video VIDEO_PATH --weights PATH [--out DIR] [--model PATH] [--target-fps N]
-    uv run crpod train --out MODEL_PATH [--arena ARENA] [--max-replays N]
+    uv run crpod train --out MODEL_PATH [--arena ARENA] [--min-arena N] [--max-replays N]
+                       [--frozen-holdout PATH]
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import re
 import sys
 from pathlib import Path
 
@@ -22,6 +24,102 @@ from crpod.types import Interaction
 
 _HOLDOUT_SEED = 0
 _HOLDOUT_FRACTION = 0.2
+
+_ARENA_INDEX_RE = re.compile(r"(\d+)$")
+
+
+def _arena_index(arena: str) -> int:
+    """Trailing integer of an arena name. `arena_23` → 23."""
+    m = _ARENA_INDEX_RE.search(arena)
+    if not m:
+        raise ValueError(f"cannot parse arena index from {arena!r}")
+    return int(m.group(1))
+
+
+def _filter_min_arena(pool: list[tuple[str, str]], min_arena: int | None) -> list[tuple[str, str]]:
+    """Restrict an HF replay pool to arenas with index ≥ `min_arena`.
+
+    Used by wave 2.5 to confine training to the top-skill cohort
+    (`--min-arena 23`) without enumerating every arena name. `None`
+    passes the pool through unchanged.
+    """
+    if min_arena is None:
+        return list(pool)
+    return [(a, r) for (a, r) in pool if _arena_index(a) >= min_arena]
+
+
+def _parse_frozen_holdout(path: Path) -> set[tuple[str, str]]:
+    """Load a committed holdout replay-id list as `(arena, replay_id)` keys.
+
+    File format: one `arena_NN replay_id` pair per line. Blank lines and
+    `#`-prefixed comments are ignored. A line with anything other than
+    exactly two whitespace-separated tokens raises so the user notices
+    immediately rather than silently corrupting the train/holdout split.
+    """
+    keys: set[tuple[str, str]] = set()
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        tokens = line.split()
+        if len(tokens) != 2:
+            raise ValueError(f"malformed frozen-holdout line in {path}: {raw!r}")
+        keys.add((tokens[0], tokens[1]))
+    return keys
+
+
+def _write_frozen_holdout(path: Path, holdout: list[tuple[str, str]]) -> None:
+    """Emit a committed holdout replay-id list. Creates parent dirs."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f"{arena} {replay_id}" for (arena, replay_id) in holdout]
+    path.write_text("\n".join(lines) + "\n")
+
+
+def _resolve_holdout_split(
+    per_replay: list[tuple[str, str, list[dict], list[float], list[Interaction]]],
+    frozen_holdout: Path | None,
+) -> tuple[list, list]:
+    """Split per-replay bundles into (train, holdout).
+
+    Three modes:
+    - `frozen_holdout` set + file exists → split exactly by the file's
+      `(arena, replay_id)` keys. The strict-serial wave-2.5 chunks all
+      reuse the same holdout this way.
+    - `frozen_holdout` set + file missing → bootstrap: random-split per
+      `_HOLDOUT_SEED`/`_HOLDOUT_FRACTION`, then write the holdout list
+      to the file so subsequent runs read instead of resample.
+    - `frozen_holdout` is `None` → legacy behaviour: random-split, no
+      file persistence.
+    """
+    if frozen_holdout is not None and frozen_holdout.exists():
+        keys = _parse_frozen_holdout(frozen_holdout)
+        train = [b for b in per_replay if (b[0], b[1]) not in keys]
+        holdout = [b for b in per_replay if (b[0], b[1]) in keys]
+        print(
+            f"frozen-holdout split: {len(train)} train + {len(holdout)} holdout "
+            f"(file: {frozen_holdout})",
+            file=sys.stderr,
+        )
+        return train, holdout
+
+    rng = random.Random(_HOLDOUT_SEED)
+    shuffled = list(per_replay)
+    rng.shuffle(shuffled)
+    n = len(shuffled)
+    # Single replay → keep it in train, leave holdout empty.
+    split_idx = max(1, min(n - 1, round(n * (1 - _HOLDOUT_FRACTION)))) if n >= 2 else n
+    train = shuffled[:split_idx]
+    holdout = shuffled[split_idx:]
+
+    if frozen_holdout is not None and not frozen_holdout.exists():
+        _write_frozen_holdout(frozen_holdout, [(b[0], b[1]) for b in holdout])
+        print(
+            f"bootstrapped frozen holdout → {frozen_holdout} "
+            f"({len(holdout)} replay ids; all subsequent chunks must reuse this file)",
+            file=sys.stderr,
+        )
+
+    return train, holdout
 
 
 def _training_target(interaction: Interaction) -> float | None:
@@ -49,7 +147,8 @@ def _positive_float(value: str) -> float:
 
 def _cmd_list(args: argparse.Namespace) -> int:
     loader = HFReplayLoader()  # no weights needed for listing
-    for arena, replay_id in loader.list_replays(arena=args.arena):
+    pool = _filter_min_arena(loader.list_replays(arena=args.arena), args.min_arena)
+    for arena, replay_id in pool:
         print(f"{arena}\t{replay_id}")
     return 0
 
@@ -165,13 +264,23 @@ def _cmd_train(args: argparse.Namespace) -> int:
     if args.max_replays <= 0:
         print("error: --max-replays must be > 0", file=sys.stderr)
         sys.exit(1)
-    loader = HFReplayLoader(yolo_weights=args.weights)
-    # Each entry is a per-replay bundle so we can split at the replay level
-    # and avoid adjacent-frame leakage across folds.
-    per_replay: list[tuple[list[dict], list[float], list[Interaction]]] = []
+    if args.min_arena is not None and args.min_arena < 0:
+        print("error: --min-arena must be ≥ 0", file=sys.stderr)
+        sys.exit(1)
+    # Wave 2H: stream-delete cached parquets after each replay loads so a
+    # 1,253-replay sweep doesn't fill a 256 GB cloud disk (~800 MB per
+    # parquet × 1,253 = ~1 TB). The price is no warm cache for retries —
+    # acceptable for the once-per-chunk brev train runs.
+    loader = HFReplayLoader(yolo_weights=args.weights, delete_after_load=True)
+    # Each per-replay bundle is keyed by (arena, replay_id) so the holdout
+    # split can be reproduced from a committed file (`--frozen-holdout`)
+    # rather than recomputed from a random shuffle on every chunk's run.
+    per_replay: list[tuple[str, str, list[dict], list[float], list[Interaction]]] = []
     seen = 0
     dropped = 0
-    available = loader.list_replays(arena=args.arena)[: args.max_replays]
+    available = _filter_min_arena(loader.list_replays(arena=args.arena), args.min_arena)[
+        : args.max_replays
+    ]
     for arena, replay_id in available:
         replay = loader.load(arena, replay_id)
         result = analyze_replay(replay)
@@ -188,7 +297,7 @@ def _cmd_train(args: argparse.Namespace) -> int:
             rep_targets.append(target)
             rep_interactions.append(interaction)
         if rep_rows:
-            per_replay.append((rep_rows, rep_targets, rep_interactions))
+            per_replay.append((arena, replay_id, rep_rows, rep_targets, rep_interactions))
     if seen:
         pct = round(100 * dropped / seen)
         print(
@@ -199,27 +308,18 @@ def _cmd_train(args: argparse.Namespace) -> int:
         print("no training data collected", file=sys.stderr)
         return 1
 
-    rng = random.Random(_HOLDOUT_SEED)
-    shuffled = list(per_replay)
-    rng.shuffle(shuffled)
-    n_replays = len(shuffled)
-    if n_replays >= 2:
-        split_idx = max(1, min(n_replays - 1, round(n_replays * (1 - _HOLDOUT_FRACTION))))
-    else:
-        split_idx = n_replays  # nothing to hold out — single replay
-    train_bundle = shuffled[:split_idx]
-    holdout_bundle = shuffled[split_idx:]
+    train_bundle, holdout_bundle = _resolve_holdout_split(per_replay, args.frozen_holdout)
 
     train_rows: list[dict] = []
     train_targets: list[float] = []
     train_interactions: list[Interaction] = []
-    for r, t, i in train_bundle:
+    for _a, _r, r, t, i in train_bundle:
         train_rows.extend(r)
         train_targets.extend(t)
         train_interactions.extend(i)
     holdout_rows: list[dict] = []
     holdout_targets: list[float] = []
-    for r, t, _ in holdout_bundle:
+    for _a, _r, r, t, _ in holdout_bundle:
         holdout_rows.extend(r)
         holdout_targets.extend(t)
 
@@ -275,6 +375,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     lst = sub.add_parser("list-replays", help="list available HF replays")
     lst.add_argument("--arena", default=None)
+    lst.add_argument(
+        "--min-arena",
+        type=int,
+        default=None,
+        help="restrict to arenas with index ≥ N (e.g. --min-arena 23 for top ladder)",
+    )
     lst.set_defaults(func=_cmd_list)
 
     ana = sub.add_parser("analyze", help="analyze one HF replay")
@@ -307,7 +413,23 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--weights", required=True, type=Path, help="path to trained YOLO weights")
     tr.add_argument("--out", required=True, type=Path)
     tr.add_argument("--arena", default=None)
+    tr.add_argument(
+        "--min-arena",
+        type=int,
+        default=None,
+        help="restrict to arenas with index ≥ N (e.g. --min-arena 23 for top ladder)",
+    )
     tr.add_argument("--max-replays", type=int, default=50)
+    tr.add_argument(
+        "--frozen-holdout",
+        type=Path,
+        default=None,
+        help=(
+            "path to a committed (arena, replay_id)-per-line holdout file. "
+            "If the file exists it dictates the train/holdout split; if not, "
+            "the random split is bootstrapped and persisted to this path."
+        ),
+    )
     tr.set_defaults(func=_cmd_train)
 
     return p

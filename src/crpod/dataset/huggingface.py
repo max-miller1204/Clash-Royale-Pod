@@ -48,6 +48,11 @@ class HFReplayLoader:
     cache_dir: Path | None = None
     token: str | None = None
     yolo_conf: float = 0.25
+    # Wave 2H: stream-delete the parquet blob after `load()` returns so a
+    # 1,253-replay sweep doesn't fill the box's disk (~800MB/replay × 1253
+    # = ~1TB, vs the typical 256GB cloud disk). Leaves the snapshot
+    # symlink dangling but that's harmless — the next download repopulates.
+    delete_after_load: bool = False
 
     def list_replays(self, arena: str | None = None) -> list[tuple[str, str]]:
         """Return (arena, replay_id) pairs available in the dataset."""
@@ -84,11 +89,35 @@ class HFReplayLoader:
             token=self.token,
         )
         detector = YoloDetector(self.yolo_weights, conf=self.yolo_conf)
-        return _parquet_to_replay(Path(path), arena=arena, replay_id=replay_id, detector=detector)
+        replay = _parquet_to_replay(Path(path), arena=arena, replay_id=replay_id, detector=detector)
+        if self.delete_after_load:
+            _unlink_blob(Path(path))
+        return replay
 
     def stream(self, arena: str | None = None) -> Iterator[Replay]:
         for a, r in self.list_replays(arena=arena):
             yield self.load(a, r)
+
+
+def _unlink_blob(path: Path) -> None:
+    """Free the disk space backing an `hf_hub_download` result.
+
+    The returned `path` is a symlink in `snapshots/<sha>/<arena>/<id>/`
+    that points at a `blobs/<sha256>` file. We unlink BOTH so a
+    1,253-replay sweep doesn't accumulate ~1 TB of cached parquets on
+    a 256 GB cloud disk. Errors are swallowed — best-effort cleanup,
+    never fatal to the train loop.
+    """
+    import os
+
+    try:
+        target = path.resolve()
+        if path.is_symlink():
+            path.unlink()
+        if target.exists() and target != path:
+            os.unlink(target)
+    except OSError as e:
+        print(f"[crpod-hf] cache cleanup failed for {path}: {e}", file=sys.stderr)
 
 
 def _decode_frames(path: Path) -> Iterator[tuple[int, np.ndarray]]:
