@@ -32,6 +32,19 @@ ENEMY_HP_PER_BAR_PX = 50.5
 # a stray VFX flash in a non-tower region) at ~25% above that threshold.
 MAX_PLAUSIBLE_BAR_PX = 75
 
+# Wave 2I: gap-tolerant longest-run config. Splash-projectile VFX overlays
+# a few pixels of the bright bar fill, breaking the True-mask into chunks
+# separated by a tiny gap. We bridge gaps up to MAX_GAP_PX, but only when
+# the segment being merged is at least MIN_BRIDGE_SEG_PX long. The minimum
+# segment length matters because the fixture frame has small adjacent
+# blobs of bar-coloured pixels (level-badge artwork, decorative edges)
+# that are 1-7 px wide — bridging those into the main bar inflates the
+# run by ~10-20% and breaks the ≤2.5% calibration. A 10-px floor rejects
+# those blobs while still letting the typical VFX-split case (≥10-px bar
+# halves with a 1-3 px gap) reunite.
+MAX_GAP_PX = 3
+MIN_BRIDGE_SEG_PX = 10
+
 # Elixir bar calibration (same fixture frame). The elixir bar is the
 # horizontal pink/magenta strip running across the top (enemy) and bottom
 # (friendly) edges of the HUD. Same colour both sides.
@@ -110,6 +123,13 @@ class HudReader:
         `region` and converts it to HP via a side-specific HP-per-pixel
         scale. Returns `None` for a vanished or implausibly long run so
         the EV target loop drops the row instead of consuming a bogus HP.
+
+        Wave 2I: the longest-run scan tolerates small VFX gaps via
+        `_longest_horizontal_run`'s `max_gap` / `min_bridge_seg` knobs, so
+        a splash projectile masking a few bar pixels no longer truncates
+        the read. The fixture-frame calibration stays ≤2.5% MAE because
+        the bridge floor rejects the small adjacent blobs that aren't
+        part of the bar (see `MIN_BRIDGE_SEG_PX` rationale above).
         """
         x1, y1, x2, y2 = region
         crop = frame[y1:y2, x1:x2]
@@ -168,12 +188,23 @@ class HudReader:
         return elixir
 
 
-def _longest_horizontal_run(mask: np.ndarray) -> int:
+def _longest_horizontal_run(
+    mask: np.ndarray,
+    max_gap: int = MAX_GAP_PX,
+    min_bridge_seg: int = MIN_BRIDGE_SEG_PX,
+) -> int:
     """Longest run of True values along the last axis, max over rows.
 
     Vectorised via an edge-diff over each row (concat-pad with zeros so
     runs touching the edges are detected). The fallback for an all-False
     row is 0; the fallback for an empty mask is 0.
+
+    Wave 2I: the longest unbroken run in each row is taken as the seed,
+    then greedily extended outwards across gaps of `≤ max_gap` pixels —
+    but only when the segment being merged is itself `≥ min_bridge_seg`
+    pixels long. This recovers the splash-VFX case (a real bar split by
+    a ≤3-px overlay reunites) without inflating reads on frames that
+    have small bar-coloured noise blobs near the actual bar.
     """
     if mask.size == 0:
         return 0
@@ -187,7 +218,33 @@ def _longest_horizontal_run(mask: np.ndarray) -> int:
         ends = np.where(diff == -1)[0]
         if starts.size == 0:
             continue
-        run = int((ends - starts).max())
+        lens = ends - starts
+        # Seed with the longest unbroken run; walk outward across small
+        # gaps to fold in adjacent substantial segments.
+        seed = int(np.argmax(lens))
+        cur_start = int(starts[seed])
+        cur_end = int(ends[seed])
+        # Extend left.
+        i = seed - 1
+        while i >= 0:
+            gap = cur_start - int(ends[i])
+            seg = int(lens[i])
+            if gap <= max_gap and seg >= min_bridge_seg:
+                cur_start = int(starts[i])
+                i -= 1
+            else:
+                break
+        # Extend right.
+        i = seed + 1
+        while i < len(starts):
+            gap = int(starts[i]) - cur_end
+            seg = int(lens[i])
+            if gap <= max_gap and seg >= min_bridge_seg:
+                cur_end = int(ends[i])
+                i += 1
+            else:
+                break
+        run = cur_end - cur_start
         if run > best:
             best = run
     return best
