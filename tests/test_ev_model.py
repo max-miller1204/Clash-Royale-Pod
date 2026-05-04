@@ -129,6 +129,115 @@ def test_interaction_features_start_hp_defaults_to_none() -> None:
     assert row["start_enemy_total_princess_hp"] is None
 
 
+# Wave 2J' — keyset, top-card cross, and time-pressure mode.
+
+
+_EXPECTED_FEATURE_KEYS = {
+    "n_friendly_cards",
+    "n_enemy_cards",
+    "friendly_elixir_spent",
+    "enemy_elixir_spent",
+    "elixir_trade",
+    "friendly_cards",
+    "enemy_cards",
+    "friendly_zones",
+    "duration_frames",
+    "start_friendly_total_princess_hp",
+    "start_enemy_total_princess_hp",
+    "top_friendly_x_top_enemy",
+    "pre_window_friendly_hp_delta_30s",
+    "pre_window_enemy_hp_delta_30s",
+    "time_pressure_mode",
+}
+
+
+def test_interaction_features_keyset_is_15_keys() -> None:
+    """11 wave-pre-2J' keys + 4 wave-2J' keys = 15. Pinned so wave 2K can't
+    silently drop a feature."""
+    row = interaction_features(_interaction("knight", 10))
+    assert set(row.keys()) == _EXPECTED_FEATURE_KEYS
+    assert len(row) == 15
+
+
+def _interaction_with_plays(
+    *,
+    friendly: tuple[CardPlay, ...] = (),
+    enemy: tuple[CardPlay, ...] = (),
+    start_seconds: float | None = None,
+) -> Interaction:
+    return Interaction(
+        start_frame=10,
+        end_frame=40,
+        friendly_plays=friendly,
+        enemy_plays=enemy,
+        friendly_elixir_spent=sum(p.elixir_cost for p in friendly),
+        enemy_elixir_spent=sum(p.elixir_cost for p in enemy),
+        start_seconds=start_seconds,
+    )
+
+
+def test_top_card_picks_highest_elixir_per_side() -> None:
+    friendly = (
+        CardPlay(frame=10, card="skeletons", x=200, y=400, side=Side.FRIENDLY, elixir_cost=1),
+        CardPlay(frame=20, card="hog_rider", x=200, y=400, side=Side.FRIENDLY, elixir_cost=4),
+        CardPlay(frame=30, card="ice_spirit", x=200, y=400, side=Side.FRIENDLY, elixir_cost=1),
+    )
+    enemy = (
+        CardPlay(frame=15, card="fireball", x=200, y=400, side=Side.ENEMY, elixir_cost=4),
+        CardPlay(frame=25, card="pekka", x=200, y=400, side=Side.ENEMY, elixir_cost=7),
+    )
+    row = interaction_features(_interaction_with_plays(friendly=friendly, enemy=enemy))
+    assert row["top_friendly_x_top_enemy"] == "hog_rider_x_pekka"
+
+
+def test_top_card_tie_break_prefers_first_played_frame() -> None:
+    friendly = (
+        CardPlay(frame=30, card="musketeer", x=200, y=400, side=Side.FRIENDLY, elixir_cost=4),
+        CardPlay(frame=10, card="hog_rider", x=200, y=400, side=Side.FRIENDLY, elixir_cost=4),
+    )
+    row = interaction_features(_interaction_with_plays(friendly=friendly))
+    assert row["top_friendly_x_top_enemy"] == "hog_rider_x_none"
+
+
+def test_top_card_empty_side_encodes_as_none() -> None:
+    friendly = (
+        CardPlay(frame=10, card="hog_rider", x=200, y=400, side=Side.FRIENDLY, elixir_cost=4),
+    )
+    row_empty_enemy = interaction_features(_interaction_with_plays(friendly=friendly))
+    assert row_empty_enemy["top_friendly_x_top_enemy"] == "hog_rider_x_none"
+
+    enemy = (CardPlay(frame=10, card="pekka", x=200, y=400, side=Side.ENEMY, elixir_cost=7),)
+    row_empty_friendly = interaction_features(_interaction_with_plays(enemy=enemy))
+    assert row_empty_friendly["top_friendly_x_top_enemy"] == "none_x_pekka"
+
+
+def test_top_card_both_empty_is_none_x_none() -> None:
+    row = interaction_features(_interaction_with_plays())
+    assert row["top_friendly_x_top_enemy"] == "none_x_none"
+
+
+def test_time_pressure_mode_boundaries() -> None:
+    cases = [
+        (0.0, "single"),
+        (179.99, "single"),
+        (180.0, "double"),
+        (299.99, "double"),
+        (300.0, "triple"),
+        (359.99, "triple"),
+        (360.0, "overtime"),
+    ]
+    for start_seconds, expected in cases:
+        row = interaction_features(_interaction_with_plays(start_seconds=start_seconds))
+        assert row["time_pressure_mode"] == expected, (
+            f"start_seconds={start_seconds} expected {expected}, got {row['time_pressure_mode']}"
+        )
+
+
+def test_time_pressure_mode_defaults_to_single_when_start_seconds_is_none() -> None:
+    row = interaction_features(_interaction_with_plays(start_seconds=None))
+    assert row["time_pressure_mode"] == "single"
+
+
 def test_save_load_round_trip(tmp_path: Path) -> None:
     # `importorskip` only catches ImportError; lightgbm on macOS without libomp
     # raises OSError during dlopen. LightGBM's sklearn API also needs scikit-learn
