@@ -153,6 +153,88 @@ def test_read_hp_bar_wrong_color_returns_none() -> None:
     assert state.friendly_left_princess_hp is None
 
 
+def test_read_hp_bar_recovers_vfx_gap_friendly() -> None:
+    """Wave 2I: a bar split by a 3-px black gap (modelling a splash-VFX
+    overlay) should reunite as a single longer run, not read as just the
+    longer half. Both halves are ≥ MIN_BRIDGE_SEG_PX so the gap-tolerant
+    reader bridges them.
+    """
+    reader = HudReader()
+    rect = HudRegions().friendly_left_hp_bar
+    x1, y1, _x2, y2 = rect
+    cyan = (240, 200, 120)
+    frame = np.zeros((960, 540, 3), dtype=np.uint8)
+    # Two cyan halves separated by a 3-px black VFX gap.
+    frame[y1:y2, x1 : x1 + 22] = cyan
+    frame[y1:y2, x1 + 25 : x1 + 50] = cyan
+    state = reader.read(frame_idx=0, frame=frame)
+    # Without the bridge: max(22, 25) = 25 → 1412 HP.
+    # With the bridge: 50 → round(50 * FRIENDLY_HP_PER_BAR_PX).
+    expected = round(50 * FRIENDLY_HP_PER_BAR_PX)
+    assert state.friendly_left_princess_hp == expected
+
+
+def test_read_hp_bar_recovers_vfx_gap_enemy() -> None:
+    """Same VFX-gap bridging behaviour for the enemy (red-mask) side."""
+    reader = HudReader()
+    rect = HudRegions().enemy_right_hp_bar
+    x1, y1, _x2, y2 = rect
+    pink = (80, 60, 220)
+    frame = np.zeros((960, 540, 3), dtype=np.uint8)
+    frame[y1:y2, x1 : x1 + 18] = pink
+    frame[y1:y2, x1 + 21 : x1 + 38] = pink
+    state = reader.read(frame_idx=0, frame=frame)
+    expected = round(38 * ENEMY_HP_PER_BAR_PX)
+    assert state.enemy_right_princess_hp == expected
+
+
+def test_read_hp_bar_does_not_bridge_short_noise_blobs() -> None:
+    """Wave 2I: a small (<MIN_BRIDGE_SEG_PX) bar-coloured blob next to the
+    main bar must NOT be merged in. This pins the calibration-preserving
+    behaviour of the gap-tolerant reader against the fixture-frame style
+    of decorative noise.
+    """
+    reader = HudReader()
+    rect = HudRegions().friendly_left_hp_bar
+    x1, y1, _x2, y2 = rect
+    cyan = (240, 200, 120)
+    frame = np.zeros((960, 540, 3), dtype=np.uint8)
+    # Main 30-px bar plus a 7-px stray blob 3 px to the right.
+    frame[y1:y2, x1 : x1 + 30] = cyan
+    frame[y1:y2, x1 + 33 : x1 + 40] = cyan
+    state = reader.read(frame_idx=0, frame=frame)
+    # The 7-px blob is below MIN_BRIDGE_SEG_PX (10), so the read stays
+    # at 30 px instead of inflating to 40.
+    expected = round(30 * FRIENDLY_HP_PER_BAR_PX)
+    assert state.friendly_left_princess_hp == expected
+
+
+def test_hp_bar_reader_calibration_within_2_5_percent() -> None:
+    """Wave 2I sanity check: the docstringed ≤2.5% MAE on the fixture
+    frame in `hud.py` is preserved after the gap-tolerant run finder
+    landed. Tighter than the ≤5% bound in
+    `test_hp_bar_reader_recovers_fixture_hps` (which exists as a looser
+    smoke test); this is the calibration regression gate.
+    """
+    frame = _load_frame()
+    reader = HudReader()
+    expected = {
+        "friendly_left_princess_hp": 1446,
+        "friendly_right_princess_hp": 3052,
+        "enemy_left_princess_hp": 2423,
+        "enemy_right_princess_hp": 1810,
+    }
+    state = reader.read(frame_idx=0, frame=frame)
+    for field, truth in expected.items():
+        got = getattr(state, field)
+        assert got is not None, f"{field} returned None"
+        rel = abs(got - truth) / truth
+        assert rel <= 0.025, (
+            f"{field}: got {got}, expected {truth}, |Δ|/truth = {rel:.1%} "
+            f"(>2.5% — the gap-tolerant run finder shifted calibration)"
+        )
+
+
 def test_read_elixir_bar_friendly_synthetic_known_length() -> None:
     """A 88-px pink bar in the friendly elixir region rounds to 2 elixir."""
     reader = HudReader()
@@ -193,6 +275,11 @@ def test_read_elixir_bar_wrong_color_does_not_read() -> None:
 
 
 def test_longest_horizontal_run_basic() -> None:
+    """Pre-2I: longest unbroken run in each row, max over rows. Wave 2I's
+    gap-tolerant bridging only kicks in when the segment-to-merge is
+    ≥ MIN_BRIDGE_SEG_PX (10), so these short toy rows fall back to the
+    simple longest-run behaviour.
+    """
     mask = np.array(
         [
             [True, True, False, True, True, True, False],
@@ -200,6 +287,40 @@ def test_longest_horizontal_run_basic() -> None:
         ]
     )
     assert _longest_horizontal_run(mask) == 3
+
+
+def test_longest_horizontal_run_bridges_vfx_gap() -> None:
+    """Wave 2I: two ≥10-px True segments separated by a ≤3-px False gap
+    are bridged — emulates a splash projectile masking a few bar pixels.
+    """
+    # 11 True, 3 False, 12 True, then 5 False. Bridged length = 26.
+    row = np.concatenate(
+        [
+            np.ones(11, dtype=bool),
+            np.zeros(3, dtype=bool),
+            np.ones(12, dtype=bool),
+            np.zeros(5, dtype=bool),
+        ]
+    )
+    mask = row.reshape(1, -1)
+    assert _longest_horizontal_run(mask) == 26
+
+
+def test_longest_horizontal_run_does_not_bridge_short_segment() -> None:
+    """Wave 2I: a short (<MIN_BRIDGE_SEG_PX) segment near a long run must
+    not be merged — this is the noise-rejection guard that preserves the
+    fixture's ≤2.5% calibration.
+    """
+    # 30 True, 3 False, 7 True. Short blob (7 px) → not bridged → 30.
+    row = np.concatenate(
+        [
+            np.ones(30, dtype=bool),
+            np.zeros(3, dtype=bool),
+            np.ones(7, dtype=bool),
+        ]
+    )
+    mask = row.reshape(1, -1)
+    assert _longest_horizontal_run(mask) == 30
 
 
 def test_longest_horizontal_run_empty() -> None:
