@@ -682,3 +682,116 @@ verify that.
 Total brev wave-2H spend: **~$11.50** ($9.59 for the successful
 14h7m run + ~$2 for the disk-fill diagnostic before the
 `delete_after_load` patch landed).
+
+## Wave 2I — drop-rate fix (code-complete; brev pending)
+
+Wave 2H bottomed out at a 19% drop rate on the arena_23+ pool, with
+two structural sources eating most of the residual:
+
+1. **Destroyed-tower bookends.** Once a princess tower is destroyed
+   the badge collapses to a stump and `_read_hp_bar` returns `None`.
+   `_training_target` then dropped the row even though the destroyed
+   tower's HP delta is structurally `0` (HP can't go below 0, and
+   towers don't unfaint).
+2. **Splash-VFX occlusion.** Princess-tower splash projectiles overlay
+   the bright bar fill for a few pixels per impact frame. The previous
+   `_longest_horizontal_run` returned the longest *unbroken* True run,
+   so a 3-px overlay split a 50-px bar into two 22/25-px halves and
+   either lost ~half the HP signal or pushed the run below the
+   readable floor entirely (`None`, dropped row).
+
+Both fixes are pure variance reductions — model class, feature
+builder, and frozen holdout (`docs/wave-2.5-holdout.txt`, 241
+replays) are unchanged. Δρ vs wave 2H's `+0.078` baseline is the
+official signal-quality measure for this chunk.
+
+### Code changes
+
+- `crpod.features.ev_target.tower_hp_delta` (`src/crpod/features/ev_target.py`)
+  now returns `0` for any tower whose HUD reads `None` across **every**
+  frame in the interaction window. Other towers keep the strict
+  bookend rule — the change is selective, not a blanket loosening. If
+  another tower's bookend is occluded the row still drops. The
+  heuristic is the simplest applicable signal: princess towers don't
+  unfaint, so a sustained `None` is structural (destroyed) rather
+  than transient (VFX).
+- `crpod.ocr.hud._longest_horizontal_run` (`src/crpod/ocr/hud.py`) is
+  now gap-tolerant. The longest unbroken run in each row is taken as
+  the seed, then greedily extended outwards across gaps of `≤ 3 px`
+  (`MAX_GAP_PX`) — but only when the segment being merged is itself
+  `≥ 10 px` (`MIN_BRIDGE_SEG_PX`). The minimum-segment guard rejects
+  the small bar-coloured noise blobs (level-badge artwork, decorative
+  edges) that sit 1-3 px from the actual bar in the fixture frame —
+  bridging those into the main run inflates calibration by 10-20%
+  and breaks the docstringed ≤2.5% MAE bound. Splash-VFX gaps
+  between two ≥10-px bar halves still bridge cleanly.
+- The mask-threshold loosening option in CHUNK.md was deferred:
+  the gap-tolerant run finder already recovers the typical case and
+  loosening the BGR mask risks reading the gold king-level crown
+  badge as a bar. Reconsider only if 2I's Δρ is unexpectedly small.
+
+### Calibration sanity
+
+`tests/test_hud_ocr.py::test_hp_bar_reader_calibration_within_2_5_percent`
+pins the four fixture-tower readings to `≤ 2.5%` of ground truth on
+`tests/fixtures/hud/sample_540x960.jpg` (the calibration frame
+referenced in `hud.py`'s docstring). All four pass post-2I:
+
+| Tower          | Truth (HP) | Read (HP) | rel err |
+| -------------- | ---------- | --------- | ------- |
+| friendly_left  | 1446       | 1412      | 2.35%   |
+| friendly_right | 3052       | 3108      | 1.83%   |
+| enemy_left     | 2423       | 2424      | 0.04%   |
+| enemy_right    | 1810       | 1818      | 0.44%   |
+
+The looser `≤ 5%` `test_hp_bar_reader_recovers_fixture_hps` test
+remains as a smoke gate; the new `_2_5_percent` test is the
+calibration regression gate.
+
+### New test coverage
+
+- `tests/test_ev_target.py`: four new tests cover the destroyed-tower
+  case (all-None window → `delta=0`), the row no longer drops when
+  the only blocker was a destroyed tower, transient bookend occlusion
+  with a readable mid-frame still drops, and the fix is selective
+  (other towers' occlusion still drops the row).
+- `tests/test_hud_ocr.py`: three new tests cover the VFX-gap recovery
+  (friendly + enemy sides) and the noise-rejection guard (a 7-px
+  stray blob 3 px from a 30-px bar must NOT be merged in). The
+  existing `_longest_horizontal_run` basic test was annotated to
+  explain why short toy rows fall back to the simple longest-run
+  behaviour under the new bridge floor.
+
+### Brev run
+
+The user runs `crpod train --weights ... --min-arena 23 --max-replays 1253 --frozen-holdout docs/wave-2.5-holdout.txt`
+on a `massedcompute_A6000_plus` instance after the wave-2I PR
+merges. The frozen-holdout file is unchanged — same 241 replays as
+wave 2H, same train/holdout boundary, so Δρ is apples-to-apples.
+
+| Field                     | Wave 2H (baseline)               | Wave 2I (this chunk)        |
+| ------------------------- | -------------------------------- | --------------------------- |
+| Wall-clock                | 14h 7m                           | TBD (brev pending)          |
+| Replays processed         | 1,203 of 1,253                   | TBD (brev pending)          |
+| Total interactions seen   | 23,662                           | TBD (brev pending)          |
+| Dropped (unreadable HUD)  | 4,526 / 23,662 (**19%**)         | **TBD (brev pending)**      |
+| Train / holdout split     | 15,206 from 962 / 3,930 from 241 | TBD (brev pending) / 3,930 from 241 |
+| Holdout MAE               | 335.00 HP                        | TBD (brev pending)          |
+| **Holdout Spearman ρ**    | **+0.078**                       | **TBD (brev pending)**      |
+| **Δρ vs wave 2H**         | —                                | **TBD (brev pending)**      |
+
+### Done-when verdict
+
+Filled in by the user after the brev run lands. The chunk-level stop
+conditions from the wave-2.5 design doc still apply: `0 < Δρ < 0.02`
+twice consecutively → stop; `Δρ < -0.02` → stop and investigate;
+re-shuffled-split ρ diverges from frozen-split ρ by `> 0.05` →
+stop (holdout has leaked).
+
+### Cost
+
+TBD (brev pending). Expected: comparable to wave 2H (~$10) since
+the same `--max-replays 1253` sweep runs on the same instance type;
+the drop-rate fix is a CPU-no-op (slightly more rows survive into
+LightGBM, but training is dominated by HF download + parquet decode,
+not the LightGBM fit itself).
