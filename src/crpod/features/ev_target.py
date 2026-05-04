@@ -39,9 +39,17 @@ def tower_hp_delta(window: list[HudState]) -> dict[str, int | None]:
     """Per-tower princess HP swing across the window.
 
     Returns one entry per tower keyed by `{friendly,enemy}_{left,right}`.
-    Each value is `end_hp - start_hp` for that tower, or `None` if either
-    bookend HUD reading was unreadable. An empty `window` yields `None` for
-    every tower.
+    Each value is `end_hp - start_hp` for that tower, `0` if the tower is
+    destroyed (every frame in the window reads `None` for it — princess
+    towers don't unfaint, so a sustained `None` is structural, not noise),
+    or `None` if either bookend was unreadable but at least one mid-window
+    frame had a valid read (transient VFX occlusion → drop the row).
+
+    An empty `window` yields `None` for every tower.
+
+    Wave 2I: the destroyed-tower → 0 special case keeps interactions whose
+    only blocker was a long-destroyed tower's stump-bookend. Other towers
+    keep the strict bookend rule.
     """
     if not window:
         return dict.fromkeys(_TOWER_KEYS)
@@ -51,5 +59,14 @@ def tower_hp_delta(window: list[HudState]) -> dict[str, int | None]:
     for key in _TOWER_KEYS:
         s = _hp_for(start, key)
         e = _hp_for(end, key)
-        out[key] = (e - s) if (s is not None and e is not None) else None
+        if s is not None and e is not None:
+            out[key] = e - s
+        elif all(_hp_for(state, key) is None for state in window):
+            # Every frame in the window reads None — tower was already
+            # destroyed before the window started (or destroyed at frame 0
+            # of an interaction that never had a live read). delta = 0
+            # rather than dropping the row.
+            out[key] = 0
+        else:
+            out[key] = None
     return out

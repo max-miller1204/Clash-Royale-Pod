@@ -126,7 +126,9 @@ def _training_target(interaction: Interaction) -> float | None:
     """Princess-tower HP-delta EV target for one interaction.
 
     Returns `None` when any of the four princess deltas is unreadable so
-    callers can drop the row.
+    callers can drop the row. Wave 2I: a long-destroyed tower (all-None
+    across the window) surfaces as `delta = 0` from `tower_hp_delta`, so
+    those interactions no longer drop — only true bookend-occlusion does.
     """
     delta = interaction.tower_hp_delta
     fl = delta.get("friendly_left")
