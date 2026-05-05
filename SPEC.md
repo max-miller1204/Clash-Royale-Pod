@@ -184,6 +184,7 @@ Base strategy: upstream-trunk
 Branch naming: swarm/{slug}-wave-{n}
 Fork remote: origin
 Upstream remote: origin
+Dispatch: tmux
 
 _Wave 1 executed 2026-05-01 on branch swarm/finish-project-wave-1; chunks 1a-side-inference, 1b-champion-costs, 1c-yolo-pod-audit; PR https://github.com/max-miller1204/Clash-Royale-Pod/pull/24_
 
