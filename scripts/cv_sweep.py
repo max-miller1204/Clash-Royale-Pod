@@ -283,65 +283,55 @@ def main(argv: list[str] | None = None) -> int:
 
     rows: list[dict] = []
 
+    # Incremental CSV writes: open once, append each row as the config
+    # finishes, flush after every row. A 14 h sweep loses nothing if the
+    # tmux drops or one cfg explodes.
+    args.out_csv.parent.mkdir(parents=True, exist_ok=True)
+    csv_fh = args.out_csv.open("w", newline="")
+    csv_writer = csv.writer(csv_fh)
+    csv_writer.writerow(["model_class", "config_repr", "mean_rho", "std_rho", "mean_mae"])
+    csv_fh.flush()
+
+    def _record(model_class: str, cfg_obj: dict, rhos: list[float], maes: list[float]) -> None:
+        row = {
+            "model_class": model_class,
+            "config_repr": repr(cfg_obj),
+            "config": cfg_obj,
+            "mean_rho": float(np.mean(rhos)),
+            "std_rho": float(np.std(rhos)),
+            "mean_mae": float(np.mean(maes)),
+        }
+        rows.append(row)
+        csv_writer.writerow(
+            [
+                row["model_class"],
+                row["config_repr"],
+                f"{row['mean_rho']:.6f}",
+                f"{row['std_rho']:.6f}",
+                f"{row['mean_mae']:.6f}",
+            ]
+        )
+        csv_fh.flush()
+
     print(f"\n=== LightGBM sweep ({len(lgb_grid)} configs) ===", flush=True)
     for i, cfg in enumerate(lgb_grid):
         print(f"[lgb {i + 1}/{len(lgb_grid)}] {cfg}", flush=True)
         rhos, maes = _cv_lgb(X_train, y_train, kf, cfg)
-        rows.append(
-            {
-                "model_class": "lightgbm",
-                "config_repr": repr(cfg),
-                "config": cfg,
-                "mean_rho": float(np.mean(rhos)),
-                "std_rho": float(np.std(rhos)),
-                "mean_mae": float(np.mean(maes)),
-            }
-        )
+        _record("lightgbm", cfg, rhos, maes)
 
     print(f"\n=== Ridge sweep ({len(ridge_grid)} configs) ===", flush=True)
     for i, cfg in enumerate(ridge_grid):
         print(f"[ridge {i + 1}/{len(ridge_grid)}] {cfg}", flush=True)
         rhos, maes = _cv_ridge(X_train, y_train, kf, cfg)
-        rows.append(
-            {
-                "model_class": "ridge",
-                "config_repr": repr(cfg),
-                "config": cfg,
-                "mean_rho": float(np.mean(rhos)),
-                "std_rho": float(np.std(rhos)),
-                "mean_mae": float(np.mean(maes)),
-            }
-        )
+        _record("ridge", cfg, rhos, maes)
 
     print(f"\n=== XGBoost sweep ({len(xgb_grid)} configs) ===", flush=True)
     for i, cfg in enumerate(xgb_grid):
         print(f"[xgb {i + 1}/{len(xgb_grid)}] {cfg}", flush=True)
         rhos, maes = _cv_xgb(X_train, y_train, kf, cfg)
-        rows.append(
-            {
-                "model_class": "xgboost",
-                "config_repr": repr(cfg),
-                "config": cfg,
-                "mean_rho": float(np.mean(rhos)),
-                "std_rho": float(np.std(rhos)),
-                "mean_mae": float(np.mean(maes)),
-            }
-        )
+        _record("xgboost", cfg, rhos, maes)
 
-    args.out_csv.parent.mkdir(parents=True, exist_ok=True)
-    with args.out_csv.open("w", newline="") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(["model_class", "config_repr", "mean_rho", "std_rho", "mean_mae"])
-        for r in rows:
-            writer.writerow(
-                [
-                    r["model_class"],
-                    r["config_repr"],
-                    f"{r['mean_rho']:.6f}",
-                    f"{r['std_rho']:.6f}",
-                    f"{r['mean_mae']:.6f}",
-                ]
-            )
+    csv_fh.close()
     print(f"\nCV table → {args.out_csv}", flush=True)
 
     # Pick winner: max mean_ρ; tie-break by min mean_MAE.
