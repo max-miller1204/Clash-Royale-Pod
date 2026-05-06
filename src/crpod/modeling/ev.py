@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from crpod.features.placement import zone_of
-from crpod.types import Interaction
+from crpod.types import CardPlay, Interaction
 
 
 def _start_total_princess_hp(left: int | None, right: int | None) -> int | None:
@@ -28,11 +28,41 @@ def _start_total_princess_hp(left: int | None, right: int | None) -> int | None:
     return left + right
 
 
+def _top_card(plays: tuple[CardPlay, ...]) -> str:
+    """Highest-elixir-cost card on a side; ties broken by first-played frame.
+
+    Empty side encodes as the literal `'none'` so the categorical levels
+    `'<card>'_x_'none'` and `'none'_x_'<card>'` stay distinct.
+    """
+    if not plays:
+        return "none"
+    return max(plays, key=lambda p: (p.elixir_cost, -p.frame)).card
+
+
+def _time_pressure_mode(start_seconds: float | None) -> str:
+    """4-level CR clock bucket. Defaults to "single" when start_seconds is None.
+
+    Boundaries from CR's standard regulation clock: 180 s single → 120 s
+    double → 60 s triple → overtime.
+    """
+    if start_seconds is None:
+        return "single"
+    if start_seconds < 180.0:
+        return "single"
+    if start_seconds < 300.0:
+        return "double"
+    if start_seconds < 360.0:
+        return "triple"
+    return "overtime"
+
+
 def interaction_features(interaction: Interaction) -> dict[str, Any]:
     """Flatten an Interaction into a feature row."""
     friendly_cards = [p.card for p in interaction.friendly_plays]
     enemy_cards = [p.card for p in interaction.enemy_plays]
     zones = [zone_of(p.x, p.y).value for p in interaction.friendly_plays]
+    top_friendly = _top_card(interaction.friendly_plays)
+    top_enemy = _top_card(interaction.enemy_plays)
     return {
         "n_friendly_cards": len(friendly_cards),
         "n_enemy_cards": len(enemy_cards),
@@ -55,6 +85,13 @@ def interaction_features(interaction: Interaction) -> dict[str, Any]:
             interaction.start_enemy_left_princess_hp,
             interaction.start_enemy_right_princess_hp,
         ),
+        # Wave 2J': top-card cross-product (categorical), pre-window HP-swing
+        # context (int | None — LightGBM treats NaN as missing-value), and
+        # CR-clock time-pressure mode (categorical).
+        "top_friendly_x_top_enemy": f"{top_friendly}_x_{top_enemy}",
+        "pre_window_friendly_hp_delta_30s": interaction.pre_window_friendly_hp_delta_30s,
+        "pre_window_enemy_hp_delta_30s": interaction.pre_window_enemy_hp_delta_30s,
+        "time_pressure_mode": _time_pressure_mode(interaction.start_seconds),
     }
 
 

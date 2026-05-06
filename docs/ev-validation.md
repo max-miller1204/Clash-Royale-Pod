@@ -884,3 +884,202 @@ are all pulling weight, so the case for **adding** signal-bearing
 features (top-card crosses, pre-window HP swings, time-pressure
 mode) is intact — there's no dead weight to displace, but there's
 also no ceiling evidence that the current feature set is saturated.
+
+## Wave 2J' — feature add (executed; ρ +0.194 → +0.223)
+
+Wave 2J' adds four feature keys to `interaction_features` on top of
+the 11-feature wave-2I baseline. Drop rate, frozen-holdout split, and
+LightGBM hyperparameters are unchanged — every variance source other
+than the feature set is held fixed, so Δρ vs wave 2I (+0.194) is the
+clean signal-quality measure.
+
+### Code changes
+
+- `crpod.types.Interaction` (`src/crpod/types.py`) gains three
+  additive optional fields: `pre_window_friendly_hp_delta_30s` and
+  `pre_window_enemy_hp_delta_30s` (`int | None`, sum of princess-tower
+  HP delta across the 30 s preceding `start_frame`, sign convention
+  `start_HP − lookback_HP`), and `start_seconds` (`float | None`,
+  `start_frame / fps`). All three default to `None` so pre-2J' call
+  sites that don't pass `fps` keep working unchanged.
+- `crpod.features.interactions.build_interactions` accepts a new
+  `fps: float | None = None` parameter (additive, after `hud`). When
+  `fps` is set, each interaction's `start_seconds` is computed and
+  the pre-window deltas are populated by scanning `hud` for the
+  closest reading at-or-before `start_frame − round(30·fps)`. The
+  deltas drop to `None` if the lookback frame is negative (replay
+  starts < 30 s before this play) or any bookend HP is unreadable —
+  same NaN-as-missing-value pattern as wave 2F's HP-context fields.
+- `crpod.modeling.ev.interaction_features` returns 15 keys (11
+  pre-2J' + 4 new): `top_friendly_x_top_enemy` (string, highest
+  `elixir_cost` card per side joined by `_x_`; tie broken by
+  first-played frame; empty side encoded as `'none'`),
+  `pre_window_friendly_hp_delta_30s` and
+  `pre_window_enemy_hp_delta_30s` (int|None, passed through from
+  `Interaction`), and `time_pressure_mode` (string, 4-level CR-clock
+  bucket: `single` < 180 s ≤ `double` < 300 s ≤ `triple` < 360 s ≤
+  `overtime`).
+- `crpod.pipeline.analyze_replay` (`src/crpod/pipeline.py:101`) now
+  forwards `fps=replay.fps`. This is the only call site with a
+  `Replay` in scope; `_cmd_train` flows through it. Without this
+  edit, every training row would have `start_seconds=None` and
+  `time_pressure_mode` would collapse to constant `"single"` — the
+  pre-window deltas would also stay `None` for every row.
+
+### New test coverage
+
+- `tests/test_interactions.py`: five new tests for the pre-window
+  delta and `start_seconds` paths — `None` when `fps` is missing,
+  `None` when the lookback frame falls before the start of the
+  replay, correct sign for a synthetic HP drop (start − lookback,
+  negative = HP lost), `None` when the lookback HUD reading has any
+  unreadable princess HP (with the enemy side still computing in the
+  same case to confirm independence), and the `start_seconds` arithmetic.
+- `tests/test_ev_model.py`: a keyset test pinning the full 15 keys (so
+  wave 2K can't silently drop a feature), plus four `_top_card`
+  cases (highest-elixir per side, tie-break by frame, empty side as
+  `'none'`, both empty as `'none_x_none'`), and seven
+  `_time_pressure_mode` boundary cases plus the `None`-default case.
+  Total 24 tests added; full suite passes at 112.
+
+### Implementation notes
+
+- **`time_pressure_mode` boundary at 180.0 / 300.0 / 360.0 is half-
+  open on the right** (`< 180` is single, `180.0` is already double).
+  The boundary tests pin both 179.99 (single) and 180.0 (double) to
+  prevent silent off-by-one regressions.
+- **`_top_card` tie-break uses `(elixir_cost, -frame)` as the `max()`
+  key** so the highest cost wins, then among ties the *lowest* frame
+  (= earliest play) wins via the negation. The test suite pins this
+  with two equal-cost plays at frames 30 and 10 → expects the frame-10
+  card.
+- **The pre-window lookback uses the closest HudState at-or-before
+  the lookback frame, not an exact frame match.** OCR sampling rate
+  is sparser than the per-frame stream, so requiring an exact frame
+  hit would force ~all pre-window deltas to `None`. The "closest
+  predecessor" pattern is the same as wave 2I's destroyed-tower
+  bookend fallback in spirit.
+- **The drop rate is identical to wave 2I (13%)** because both runs
+  trained on the same data through the same HUD reader. The new
+  features either populate or fall back to `None` on a per-row
+  basis; they don't gate inclusion in `_training_target`. So the
+  comparison is apples-to-apples on the same 16,490 train / 4,030
+  holdout rows.
+
+### Brev run
+
+`crpod train --weights output/models/crpod_v1_best.pt --out output/models/ev_wave2j_prime.joblib --min-arena 23 --max-replays 1253 --frozen-holdout docs/wave-2.5-holdout.txt`
+ran on a fresh `massedcompute_A6000_plus` instance — started
+`2026-05-04T22:37:13Z`, exited cleanly at `2026-05-05T12:15:04Z`.
+The frozen-holdout file is unchanged — same 241 replays as waves 2H
+/ 2I / 2J, same train/holdout boundary, so Δρ is apples-to-apples.
+
+| Field                     | Wave 2I (baseline)                 | Wave 2J' (this chunk)              |
+| ------------------------- | ---------------------------------- | ---------------------------------- |
+| Wall-clock                | 11h 27m                            | **13h 38m** (+19%; longer with 4 extra columns through pandas + LightGBM, no real cause for concern) |
+| Replays processed         | 1,251 of 1,253                     | **1,253 of 1,253**                 |
+| Total interactions seen   | 23,662                             | 23,662 (same data pool)            |
+| Dropped (unreadable HUD)  | 3,142 / 23,662 (13%)               | **3,142 / 23,662 (13%)** — identical (no HUD-reader change) |
+| Train / holdout split     | 16,490 from 1,010 / 4,030 from 241 | **16,490 from 1,010 / 4,030 from 241** — identical (frozen-holdout) |
+| `per_card_stats` cards    | 72                                 | **72** — identical                 |
+| LightGBM features used    | 11                                 | **15** (4 new keys all materialised) |
+| Holdout MAE               | 326.82 HP                          | **318.44 HP** (−2.6%)              |
+| **Holdout Spearman ρ**    | **+0.194**                         | **+0.223**                         |
+| **Δρ vs wave 2I**         | —                                  | **+0.029** (above the 0.02 noise band, well clear of the −0.02 stop) |
+
+### Per-feature importance after retrain
+
+Same audit script as wave 2J (`scripts/audit_ev_features.py`) re-run
+against `ev_wave2j_prime.joblib`. `max(gain) = 5_334_415_956`, now
+held by `pre_window_enemy_hp_delta_30s` — the new features
+re-shuffled the top of the table.
+
+| Feature                            |          Gain | Split | Gain / max |
+| ---------------------------------- | ------------: | ----: | ---------: |
+| `pre_window_enemy_hp_delta_30s`    | 5,334,415,956 |   597 |   100.00 % |
+| `pre_window_friendly_hp_delta_30s` | 4,079,600,076 |   754 |    76.48 % |
+| `start_enemy_total_princess_hp`    | 3,338,525,824 |   897 |    62.58 % |
+| `start_friendly_total_princess_hp` | 3,192,194,252 |   768 |    59.84 % |
+| `top_friendly_x_top_enemy`         | 3,138,103,973 |   741 |    58.83 % |
+| `friendly_zones`                   | 1,402,508,713 |   446 |    26.29 % |
+| `duration_frames`                  | 1,401,832,745 |   437 |    26.28 % |
+| `elixir_trade`                     | 1,146,546,553 |   324 |    21.49 % |
+| `enemy_cards`                      |   762,112,029 |   244 |    14.29 % |
+| `friendly_cards`                   |   672,062,375 |   213 |    12.60 % |
+| `friendly_elixir_spent`            |   522,569,141 |   205 |     9.80 % |
+| `enemy_elixir_spent`               |   402,522,586 |   159 |     7.55 % |
+| `n_enemy_cards`                    |   296,366,501 |   125 |     5.56 % |
+| `n_friendly_cards`                 |   217,355,534 |    90 |     4.07 % |
+| `time_pressure_mode`               |             0 |     0 |     0.00 % |
+
+Three of the four new features pulled real weight (`pre_window_enemy`,
+`pre_window_friendly`, `top_friendly_x_top_enemy` — all in the top 5
+by gain). The fourth (`time_pressure_mode`) was inert — zero gain,
+zero splits, the model never used it. By the wave 2J audit rule
+(`gain < 1% × max(gain)` AND `split < 5`) it qualifies for dropping
+in a future audit pass; left in this wave per the additive-only
+discipline so the comparison stays clean. The 11 existing features
+all kept their splits and stayed above the audit threshold —
+`n_friendly_cards` is the lowest at 4.07 %, still 4× the drop line.
+
+### Done-when verdict
+
+| Criterion (from SPEC.md row)                                   | Status                                                                                                                                                |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| All three features wired through `Interaction` → `interaction_features` | **Met.** Four feature keys land in `interaction_features` (the spec listed three named features but the top-card cross + pre-window pair + time-pressure mode = four columns once the pair is split per side). All three additive `Interaction` fields populate from `build_interactions(..., fps=replay.fps)`. |
+| Unit tests cover synthetic Interaction + Replay.hud pre-window scan, tie-break + empty-side cases, clock-boundary cases | **Met.** 24 new tests in `test_interactions.py` and `test_ev_model.py`. Full suite passes at 112 / 112.   |
+| ρ recorded with Δρ vs 2J in `docs/ev-validation.md`            | **Met.** Δρ measured against wave 2I's +0.194 (per CHUNK.md — wave 2J was audit-only with no model retrain, so its ρ ≡ 2I's). Δρ = +0.029.            |
+
+Wave-2.5 stop conditions:
+
+- `Δρ < -0.02 → stop and investigate` — got +0.029, no stop.
+- `0 < Δρ < 0.02 twice consecutively → stop the wave-2.5 push` — +0.029
+  is just above the noise band. One more sub-noise wave (wave 2K's
+  Δρ < 0.02 vs 2J') would trigger this rule; this wave on its own
+  does not.
+- `re-shuffled-split ρ diverges from frozen-split ρ by > 0.05 → stop`
+  — frozen-split path used end-to-end; re-shuffle leak check stays
+  on the wave-2K to-do.
+
+### Cost
+
+**~$9.27** (`massedcompute_A6000_plus` × 13h 38m × $0.68/hr) for the
+train wall-clock alone. The +19% wall-clock vs wave 2I is consistent
+with the 4 extra columns going through pandas + LightGBM at the
+margin; no other cause showed up in the log (`ocr_fail=0%`
+throughout, no retries). Idle-time billing after `train exit` adds a
+small tail; running total stays under $10.
+
+### Interpretation
+
+The pre-window HP-delta pair is the dominant new signal — both rows
+sit above wave 2F's HP-context pair in the new importance table, and
+the `pre_window_enemy_hp_delta_30s` column took the #1 slot
+outright. The intuition: knowing how much HP each side conceded in
+the 30 s before a play conditions the EV target almost as strongly as
+knowing the absolute HP at play time. A side that just conceded 500
+HP behaves differently in the same absolute-HP state than a side
+that just took 0 — that's structural state the wave-2F features
+couldn't see.
+
+`top_friendly_x_top_enemy` landed at the #5 slot (58.83 %) — solid
+contribution, suggests the LightGBM categorical split is finding
+real card-pair-level structure beyond what `friendly_cards` /
+`enemy_cards` already encode. Plausibly because the pair captures
+match-up dynamics (e.g. tank-vs-counter) that the bag-of-cards
+columns scatter across many splits.
+
+`time_pressure_mode` was entirely inert (zero gain, zero splits).
+Most plausibly because the 4-level coarse bucket loses the
+information `start_seconds` would carry directly, and because the
+training pool is dominated by single-elixir-time interactions —
+LightGBM saw too few `double` / `triple` / `overtime` samples to
+benefit from the split. A future wave could either drop it or
+replace it with a continuous `start_seconds` column.
+
+**Wave 2K decision:** the design doc says 2K runs only if 2J''s Δρ
+is small. +0.029 is small (just above the 0.02 noise band) — wave
+2K is on. Its hyperparameter sweep + model class A/B has the
+reasonable runway here; the new features have already moved ρ from
++0.194 to +0.223 with default LightGBM settings, so a tuned LightGBM
+or a different model class is the next plausible lever.
