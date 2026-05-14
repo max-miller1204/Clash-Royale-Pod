@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Clash Royale Post-Game Analyzer — Project Overview</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1f2937;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --good: #16a34a;
+    --warn: #d97706;
+    --bad: #dc2626;
+    --rule: #e5e7eb;
+    --code-bg: #f3f4f6;
+  }
+  html, body { background: var(--bg); color: var(--fg); }
+  body {
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0; padding: 32px;
+    max-width: 880px; margin-left: auto; margin-right: auto;
+  }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  h2 { font-size: 20px; margin: 32px 0 12px; padding-bottom: 4px; border-bottom: 1px solid var(--rule); }
+  h3 { font-size: 16px; margin: 24px 0 8px; }
+  .subtitle { color: var(--muted); margin: 0 0 24px; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+  .pill.good { background: #dcfce7; color: var(--good); }
+  .pill.warn { background: #fef3c7; color: var(--warn); }
+  .pill.bad  { background: #fee2e2; color: var(--bad); }
+  .pill.todo { background: #e0e7ff; color: var(--accent); }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0 16px; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  code { background: var(--code-bg); padding: 1px 4px; border-radius: 3px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
+  pre { background: var(--code-bg); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+  .pipeline {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 4px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    background: var(--code-bg);
+    padding: 16px;
+    border-radius: 6px;
+    line-height: 1.4;
+  }
+  .pipeline .arrow { text-align: center; color: var(--muted); }
+  .pipeline .stage { padding: 6px 10px; background: white; border: 1px solid var(--rule); border-radius: 4px; }
+  .stage.new { border-left: 3px solid var(--accent); }
+  .note { color: var(--muted); font-size: 13px; margin-top: -6px; }
+</style>
+</head>
+<body>
+
+<h1>Clash Royale Post-Game Analyzer</h1>
+<p class="subtitle">
+  A computer-vision + statistical-modeling pipeline that turns a Clash Royale
+  match replay into <em>actionable feedback</em>: where you traded elixir
+  poorly, which plays the model thinks were "blunders," and how the match
+  flowed in tempo and tower-HP over time.
+</p>
+
+<h2>Where the project is right now</h2>
+
+<table>
+  <thead>
+    <tr><th>Layer</th><th>Status</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>YOLOv8 detector</td>
+      <td><span class="pill good">done</span></td>
+      <td>mAP@0.5 = <strong>0.885</strong>, trained on the public KataCR dataset (6,966 frames, ~150 classes). Weights at <code>output/models/crpod_v1_best.pt</code>.</td>
+    </tr>
+    <tr>
+      <td>HUD reader (elixir, timer, princess HP)</td>
+      <td><span class="pill good">done</span></td>
+      <td>Wave 2E swapped tesseract digit OCR for HSV-mask HP-bar pixel sampling. Wave 2I made it gap-tolerant for VFX occlusion.</td>
+    </tr>
+    <tr>
+      <td>EV target = princess-tower HP delta</td>
+      <td><span class="pill good">done</span></td>
+      <td>Replaced the original <code>elixir_trade</code> proxy. Trained on arena_23+ pool (Wave 2H).</td>
+    </tr>
+    <tr>
+      <td>EV model holdout signal</td>
+      <td><span class="pill good">done</span></td>
+      <td>Spearman ρ <strong>+0.223</strong> on N=4,030 (Wave 2J'). Up from −0.037 at Wave 2E.</td>
+    </tr>
+    <tr>
+      <td>Wave 2K — model A/B + hyperparameter sweep</td>
+      <td><span class="pill warn">scaffolded, awaiting brev compute</span></td>
+      <td>CV sweep script committed on <code>swarm/wave-2k-model-class-ab</code>. Needs a paid brev train run to compare LightGBM / Ridge / XGBoost on the wave-2J' training fold. <em>Optional polish — Δρ likely small.</em></td>
+    </tr>
+    <tr>
+      <td>Wave 3 — blunder detection</td>
+      <td><span class="pill todo">in progress</span></td>
+      <td>Statistical rule: flag plays whose predicted EV is &gt; 1σ below the per-card training-fold median. Pure logic; no GPU.</td>
+    </tr>
+    <tr>
+      <td>Wave 4 — production polish</td>
+      <td><span class="pill todo">in progress</span></td>
+      <td>One-page HTML report, latency budget, arena_15 smoke run, docs polish.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>The pipeline (after this work lands)</h2>
+
+<div class="pipeline">
+  <div class="stage">VIDEO file or HF replay frames</div>
+  <div class="arrow">↓</div>
+  <div class="stage">YoloDetector — bounding boxes per frame</div>
+  <div class="arrow">↓</div>
+  <div class="stage">ByteTrack — stitch boxes into persistent tracks</div>
+  <div class="arrow">↓</div>
+  <div class="stage">HudReader — princess-tower HP + elixir + timer per frame</div>
+  <div class="arrow">↓</div>
+  <div class="stage">CardPlay + HudState streams</div>
+  <div class="arrow">↓</div>
+  <div class="stage">build_interactions — group plays into 40-frame windows</div>
+  <div class="arrow">↓</div>
+  <div class="stage">EvModel.predict — princess-HP-delta EV per interaction</div>
+  <div class="arrow">↓</div>
+  <div class="stage new">detect_blunders — flag plays &gt; 1σ below per-card median (NEW)</div>
+  <div class="arrow">↓</div>
+  <div class="stage new">render_report — self-contained HTML report (NEW)</div>
+</div>
+
+<p class="note">The two highlighted stages are what waves 3 and 4 add. Everything above them is already shipping.</p>
+
+<h2>The two key contracts</h2>
+
+<h3>1. The EV target</h3>
+<p>
+  Each <strong>Interaction</strong> is a 40-frame window pairing your card placements
+  with the opponent's. The model's training target is:
+</p>
+<pre>(friendly_left_princess_Δhp + friendly_right_princess_Δhp)
+  − (enemy_left_princess_Δhp + enemy_right_princess_Δhp)</pre>
+<p>
+  Sign convention: <strong>positive = your towers came out ahead</strong> in the window.
+  King HP is excluded (only renders when damaged).
+</p>
+
+<h3>2. The blunder rule</h3>
+<p>
+  For each play with an EV prediction, the model looks up the
+  <strong>training-fold median &amp; std</strong> for that specific card
+  (anchored on the friendly side's first card in the interaction).
+  A play is a <strong>blunder</strong> when:
+</p>
+<pre>(per_card_median − predicted_ev) / per_card_std &gt; 1.0</pre>
+<p>
+  In words: you played a card, and the model thinks the outcome you're
+  about to get is more than one standard deviation worse than that card's
+  typical outcome. Cards with fewer than 5 training samples are skipped
+  (signal too noisy) — they already drop out of <code>per_card_stats</code> upstream.
+</p>
+
+<h2>What you'll see after a successful run</h2>
+
+<pre>output/analysis/&lt;replay_id&gt;/
+  ├── summary.json      — counts, leak, tempo summary
+  ├── blunders.json     — top-N blunder plays w/ z-score and card median   (NEW)
+  ├── placements.png    — heatmap of where you placed troops
+  ├── tempo.png         — running elixir-spent differential
+  └── report.html       — self-contained one-page report                   (NEW)</pre>
+
+<h2>Why this matters</h2>
+<p>
+  The original pod spec asked: can we use CV + stats to grade Clash Royale
+  decisions the way chess engines grade moves? The answer this project
+  ships is "yes, weakly but measurably." Wave-2.5's signal-quality push
+  took the EV model from <em>indistinguishable from random</em> (ρ = −0.04)
+  to <em>small-but-real</em> (ρ = +0.22, ~14σ above zero on N=4,030). That's
+  enough signal for the blunder rule to surface the worst few plays per
+  match — which is exactly what the pod-facing deliverable is.
+</p>
+
+<hr style="margin-top: 40px; border: none; border-top: 1px solid var(--rule);" />
+<p class="note">
+  Generated as part of <code>/goal finish this project</code>.
+  Open this file directly in any browser; no network or build step needed.
+</p>
+
+</body>
+</html>
