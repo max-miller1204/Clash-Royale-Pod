@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How blunder detection works</title>
+<style>
+  :root {
+    --bg: #fafafa; --fg: #1f2937; --muted: #6b7280; --accent: #2563eb;
+    --good: #16a34a; --warn: #d97706; --bad: #dc2626; --rule: #e5e7eb;
+    --code-bg: #f3f4f6;
+  }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0; padding: 32px;
+    max-width: 880px; margin-left: auto; margin-right: auto;
+  }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  h2 { font-size: 20px; margin: 32px 0 12px; padding-bottom: 4px; border-bottom: 1px solid var(--rule); }
+  h3 { font-size: 16px; margin: 24px 0 8px; }
+  .subtitle { color: var(--muted); margin: 0 0 24px; }
+  code { background: var(--code-bg); padding: 1px 4px; border-radius: 3px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
+  pre { background: var(--code-bg); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0 16px; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .formula {
+    background: white; border: 1px solid var(--rule); border-radius: 6px;
+    padding: 16px; margin: 12px 0; text-align: center;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 16px;
+  }
+  .formula strong { font-size: 20px; color: var(--accent); }
+  .example {
+    background: white; border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin: 12px 0; border-radius: 0 6px 6px 0;
+  }
+  .blunder { color: var(--bad); font-weight: 600; }
+  .ok { color: var(--good); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>How blunder detection works</h1>
+<p class="subtitle">
+  The wave-3 deliverable: a single statistical rule that turns the EV
+  model's predictions into a list of "you should have played something else"
+  callouts.
+</p>
+
+<h2>The rule, in one line</h2>
+
+<div class="formula">
+  A play is a blunder when <strong>(median<sub>card</sub> − EV<sub>pred</sub>) / σ<sub>card</sub> &gt; 1</strong>
+</div>
+
+<p>
+  In plain English: <em>the model thinks the outcome you're about to get
+  from this card is more than one standard deviation worse than what the
+  card typically returns.</em>
+</p>
+
+<h2>Three pieces, each from a different stage</h2>
+
+<table>
+  <thead>
+    <tr><th>Variable</th><th>Where it comes from</th><th>What it represents</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>EV<sub>pred</sub></code></td>
+      <td><code>EvModel.predict(interaction_features)</code></td>
+      <td>LightGBM's predicted "(friendly princess Δhp) − (enemy princess Δhp)" for the 40-frame window starting at this play.</td>
+    </tr>
+    <tr>
+      <td><code>median<sub>card</sub></code></td>
+      <td><code>EvModel.per_card_stats[card][0]</code></td>
+      <td>The training-fold median of that quantity, grouped by the card you just played (anchored on the friendly side's first card per interaction).</td>
+    </tr>
+    <tr>
+      <td><code>σ<sub>card</sub></code></td>
+      <td><code>EvModel.per_card_stats[card][1]</code></td>
+      <td>The training-fold population standard deviation for the same card.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p class="subtitle">
+  <code>per_card_stats</code> is computed once at training time and
+  persisted inside the <code>.joblib</code> artifact. Inference never
+  needs the training data on disk — just the model and the stats dict.
+</p>
+
+<h2>Why a card-aware threshold</h2>
+
+<p>
+  A naive blunder rule would just compare predicted EV to global median:
+  "any play scoring below the typical play is bad." But that punishes
+  high-variance cards unfairly.
+</p>
+
+<div class="example">
+  <strong>Example.</strong> Mega Knight is a defensive card — when you
+  play it the typical outcome is "you lost a little tower HP because you
+  were already getting tower-dived." Its training-fold median is around
+  <code>-300</code>, with σ ≈ 400.<br />
+  Knight is a cheap tempo card — typical outcome ≈ <code>0</code> (it
+  doesn't usually win the trade outright but doesn't lose much either).
+  Its σ is ≈ 100.<br /><br />
+  An EV prediction of <code>-200</code> is:
+  <ul>
+    <li>Mega Knight: <span class="ok">(−300 − (−200)) / 400 = −0.25σ → not a blunder</span> (better than typical)</li>
+    <li>Knight: <span class="blunder">(0 − (−200)) / 100 = +2.0σ → BLUNDER</span> (much worse than typical)</li>
+  </ul>
+  Same predicted outcome, completely different judgment — because the
+  rule asks "is this bad <em>for this card</em>?"
+</div>
+
+<h2>Why &gt; 1σ specifically</h2>
+
+<p>
+  One standard deviation captures roughly the worst 16 % of plays for a
+  normally-distributed card (the long left tail). In practice:
+</p>
+<ul>
+  <li>Most matches surface 0–3 blunders — pod-shippable density.</li>
+  <li>Cranking the threshold to 2σ would surface only the worst 2 % —
+    great for "did I make any obvious crime?" but too sparse for
+    coaching feedback.</li>
+  <li>Dropping to 0.5σ would flag every below-average play as a blunder —
+    which is correct in a literal sense but useless as advice.</li>
+</ul>
+<p>
+  The threshold is hardcoded as <code>_SIGMA_THRESHOLD = 1.0</code> in
+  <code>src/crpod/analysis/blunders.py</code>. Bumping it is a one-line
+  change if a different sensitivity is wanted later.
+</p>
+
+<h2>What gets filtered out</h2>
+
+<p>The detector intentionally skips:</p>
+<ul>
+  <li><strong>Cards with fewer than 5 training-fold samples.</strong>
+    These are already filtered out of <code>per_card_stats</code> by
+    <code>compute_per_card_stats</code> in <code>crpod.modeling.ev</code>
+    — a card the detector has never seen 5 times can't be judged.</li>
+  <li><strong>Cards the model has literally never seen.</strong>
+    Missing-key lookups return <code>None</code> from
+    <code>per_card_stats.get(card)</code>; the detector silently skips
+    the play rather than fabricating a comparison.</li>
+  <li><strong>Cards whose training distribution has zero std.</strong>
+    Mathematically pathological — would divide by zero. In practice this
+    almost never happens since <code>statistics.pstdev</code> only
+    returns zero for an exactly-constant series.</li>
+</ul>
+
+<h2>What the output looks like</h2>
+
+<pre>[
+  {
+    "play_idx": 17,
+    "card": "hog_rider",
+    "ev_predicted": -250.3,
+    "per_card_median": 80.0,
+    "sigma_below": 2.65
+  },
+  {
+    "play_idx": 4,
+    "card": "knight",
+    "ev_predicted": -45.0,
+    "per_card_median": 12.0,
+    "sigma_below": 1.42
+  }
+]</pre>
+<p class="subtitle">
+  Plays are ordered worst-first. <code>play_idx</code> is the index into
+  <code>result.interactions</code> so you can recover the full window
+  context (start frame, enemy plays, elixir trade) downstream.
+</p>
+
+<h2>What it doesn't (yet) do</h2>
+
+<ul>
+  <li><strong>Doesn't tell you what you should have played instead.</strong>
+    Counterfactual reasoning would need a per-game-state action-value
+    table, which is a whole separate research project. Wave 3's blunder
+    list is descriptive ("this was bad"), not prescriptive ("you should
+    have done X").</li>
+  <li><strong>Doesn't account for game state / score.</strong> Down
+    two towers in overtime, conservative plays look worse than they
+    "should" — but the EV target itself doesn't condition on score,
+    so the blunder rule doesn't either.</li>
+  <li><strong>Treats the friendly anchor card as the only one that
+    matters per interaction.</strong> If you played Knight + Musketeer
+    and the model thinks the outcome was awful, only Knight gets
+    blamed (it's the anchor). The CLI surfaces the interaction context
+    so you can manually attribute, but the rule itself is single-card.</li>
+</ul>
+
+<hr style="margin-top: 40px; border: none; border-top: 1px solid var(--rule);" />
+<p class="subtitle">
+  Source: <code>src/crpod/analysis/blunders.py</code>.
+  Tests: <code>tests/test_blunders.py</code> (8 cases — zero, multi,
+  threshold-strict, &lt;5-samples, unknown-card, zero-σ, length-mismatch,
+  play-idx alignment).
+</p>
+
+</body>
+</html>

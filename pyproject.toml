@@ -47,6 +47,11 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
+[tool.ruff.lint.per-file-ignores]
+# report.py is an HTML/CSS template — long inline style declarations are
+# easier to read on one line than artificially wrapped.
+"src/crpod/visualization/report.py" = ["E501"]
+
 [tool.mypy]
 python_version = "3.11"
 mypy_path = "src"

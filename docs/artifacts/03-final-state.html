@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Project final state — Clash Royale Post-Game Analyzer</title>
+<style>
+  :root {
+    --bg: #fafafa; --fg: #1f2937; --muted: #6b7280; --accent: #2563eb;
+    --good: #16a34a; --warn: #d97706; --bad: #dc2626; --rule: #e5e7eb;
+    --code-bg: #f3f4f6;
+  }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0; padding: 32px;
+    max-width: 880px; margin-left: auto; margin-right: auto;
+  }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  h2 { font-size: 20px; margin: 32px 0 12px; padding-bottom: 4px; border-bottom: 1px solid var(--rule); }
+  h3 { font-size: 16px; margin: 24px 0 8px; }
+  .subtitle { color: var(--muted); margin: 0 0 24px; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill.good { background: #dcfce7; color: var(--good); }
+  .pill.warn { background: #fef3c7; color: var(--warn); }
+  .pill.bad { background: #fee2e2; color: var(--bad); }
+  .pill.muted { background: #e5e7eb; color: var(--muted); }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0 16px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; background: white; }
+  code { background: var(--code-bg); padding: 1px 4px; border-radius: 3px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
+  pre { background: var(--code-bg); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 16px 0; }
+  .stat { background: white; border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; }
+  .stat .label { font-size: 11px; text-transform: uppercase; color: var(--muted); letter-spacing: 0.05em; }
+  .stat .value { font-size: 22px; font-weight: 600; margin-top: 4px; }
+  .stat .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .next-up { background: white; border-left: 3px solid var(--warn); padding: 12px 16px; margin: 12px 0; border-radius: 0 6px 6px 0; }
+</style>
+</head>
+<body>
+
+<h1>Project final state</h1>
+<p class="subtitle">
+  Where the Clash Royale Post-Game Analyzer landed at the end of the
+  "finish this project" goal pass on 2026-05-14.
+</p>
+
+<h2>Headline numbers</h2>
+<div class="stat-grid">
+  <div class="stat"><div class="label">Tests passing</div><div class="value">131/131</div><div class="sub">+11 new (8 blunder, 6 report, 5 timing)</div></div>
+  <div class="stat"><div class="label">EV model ρ</div><div class="value">+0.223</div><div class="sub">Spearman, N=4,030 holdout</div></div>
+  <div class="stat"><div class="label">YOLO mAP@0.5</div><div class="value">0.885</div><div class="sub">target ≥ 0.70</div></div>
+  <div class="stat"><div class="label">Arena_15 smoke</div><div class="value">8/8 ok</div><div class="sub">0% failure on CPU sample</div></div>
+  <div class="stat"><div class="label">CPU YOLO time</div><div class="value">~70 ms/frame</div><div class="sub">GPU est. ~5 ms/frame</div></div>
+</div>
+
+<h2>What waves shipped this session</h2>
+
+<table>
+  <thead>
+    <tr><th>Wave</th><th>Status</th><th>What it added</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Wave 3 — Blunder detection</strong></td>
+      <td><span class="pill good">shipped</span></td>
+      <td>
+        <code>Blunder</code> dataclass · <code>crpod.analysis.blunders.detect_blunders</code> ·
+        CLI integration writing <code>blunders.json</code> · 8 unit tests covering threshold,
+        ordering, edge cases, length-mismatch
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Wave 4A — HTML report</strong></td>
+      <td><span class="pill good">shipped</span></td>
+      <td>
+        <code>crpod.visualization.report.render_report</code> · self-contained one-page
+        <code>report.html</code> bundling summary + blunders + base64-PNGs · 6 unit tests
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Wave 4B — Latency audit</strong></td>
+      <td><span class="pill good">shipped</span></td>
+      <td>
+        <code>crpod.instrumentation.Timer</code> wrapping decode / yolo / tracker / hud /
+        features / ev stages · <code>scripts/latency_audit.py</code> harness ·
+        <code>scripts/latency_report.py</code> aggregator · <code>docs/latency-budget.md</code>
+        with 3-run CPU baseline · 5 unit tests
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Wave 4C — Arena_15 smoke</strong></td>
+      <td><span class="pill good">shipped</span></td>
+      <td>
+        <code>scripts/smoke_arena15.sh</code> driving end-to-end <code>crpod analyze</code> over
+        all 76 replays · 8-replay verification run on CPU at 0% failure ·
+        <code>docs/known-issues.md</code>
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Wave 4D — Docs polish</strong></td>
+      <td><span class="pill good">shipped</span></td>
+      <td>
+        README quickstart updated with <code>blunders.json</code> + <code>report.html</code> ·
+        TODO blunder/report/latency/smoke checkboxes flipped · per-file ruff ignore for the
+        HTML-template module
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Wave 2K — Model A/B + hyperparameter sweep</strong></td>
+      <td><span class="pill warn">deferred to operator</span></td>
+      <td>
+        Branch <code>swarm/wave-2k-model-class-ab</code> contains a complete CV-sweep harness
+        (<code>scripts/cv_sweep.py</code>) — 220 configs × 5 folds across LightGBM / Ridge /
+        XGBoost, with a one-shot frozen-holdout fit and re-shuffled-split leak check.
+        Run blocked at dispatch time: the brev agent reported a logged-out auth state, killing
+        the run before any compute was spent. <code>brev login</code> + re-dispatch
+        unblocks. See <a href="#wave-2k">below</a>.
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Files added or changed this session</h2>
+
+<h3>Source (<code>src/crpod/</code>)</h3>
+<pre>analysis/__init__.py            NEW  — package marker for post-analysis stages
+analysis/blunders.py            NEW  — detect_blunders implementation (~70 LOC)
+instrumentation/__init__.py     NEW  — Timer re-export
+instrumentation/timing.py       NEW  — Timer context manager (~80 LOC)
+visualization/report.py         NEW  — self-contained HTML report (~170 LOC)
+__main__.py                     EDIT — _populate_blunders + _write_blunders_json,
+                                       render_report call, blunders.json output,
+                                       n_blunders field in summary.json
+pipeline.py                     EDIT — AnalysisResult.blunders field,
+                                       Timer-wrapped stages in analyze_video
+types.py                        EDIT — Blunder dataclass</pre>
+
+<h3>Tests (<code>tests/</code>)</h3>
+<pre>test_blunders.py                NEW  — 8 cases
+test_report.py                  NEW  — 6 cases
+test_instrumentation.py         NEW  — 5 cases</pre>
+
+<h3>Scripts (<code>scripts/</code>)</h3>
+<pre>latency_audit.py                NEW  — Timer harness, JSONL output
+latency_report.py               NEW  — JSONL → percentile Markdown
+smoke_arena15.sh                NEW  — end-to-end 76-replay smoke</pre>
+
+<h3>Docs (<code>docs/</code>)</h3>
+<pre>latency-budget.md               NEW  — CPU baseline + GPU extrapolation
+known-issues.md                 NEW  — carried limitations index
+latency-runs.jsonl              NEW  — persisted timer run history
+artifacts/00-overview.html      NEW  — project overview explainer
+artifacts/01-blunder-detection.html  NEW  — blunder math explainer
+artifacts/02-html-report.html   NEW  — report design notes
+artifacts/03-final-state.html   NEW  — this file</pre>
+
+<h3>Misc</h3>
+<pre>pyproject.toml                  EDIT — per-file ruff ignore for HTML template
+README.md                       EDIT — quickstart updated, key docs section
+docs/TODO.md                    EDIT — stretch-goal checkboxes flipped to [x]</pre>
+
+<h2 id="wave-2k">What's left: wave 2K</h2>
+
+<div class="next-up">
+  <strong>One outstanding item.</strong> Wave 2K (the final signal-quality
+  push) was dispatched as a parallel brev agent during this session.
+  The agent reported "Brev CLI says I'm logged out" and exited without
+  spending any compute. To unblock:
+  <ol>
+    <li>Run <code>brev login</code> locally so the host's brev auth refreshes.</li>
+    <li>Re-dispatch the wave-2K run — either manually via the
+        instructions in <code>SPEC.md</code> §Wave 2.5, or by relaunching
+        the same agent prompt.</li>
+  </ol>
+  Expected cost: ~$10 on <code>massedcompute_A6000_plus</code> (matches
+  the wave-2J' run). Expected return: a final ρ value with Δρ vs +0.223,
+  the CV-winning model class &amp; hyperparameters, and a re-shuffled-split
+  leak verdict — all written to <code>docs/ev-validation.md</code>.
+</div>
+
+<h2>Pipeline diagram, final form</h2>
+
+<pre>VIDEO file (or HF replay frames)
+  ↓ Timer.record("decode")
+VideoFrameIterator → list[(idx, frame)]
+  ↓ Timer.record("yolo")
+YoloDetector.infer → list[Detection]
+  ↓ Timer.record("tracker")
+ByteTrack Tracker → list[Track] → list[CardPlay]
+  ↓ Timer.record("hud")
+HudReader.read → list[HudState] (HSV-mask princess-HP pixel sampling)
+  ↓ Timer.record("features")
+_assemble_replay → Replay
+  ↓ Timer.record("ev")
+analyze_replay
+  ├── build_interactions(plays, hud, fps)        → list[Interaction]
+  ├── [interaction_features(i) for i ...]        → feature rows
+  ├── EvModel.predict(rows)                      → ev_predictions
+  └── friendly_leak / enemy_leak / running_tempo
+  ↓
+_populate_blunders (CLI layer)
+  └── detect_blunders(anchor_plays, preds, per_card_stats)
+  ↓
+output/analysis/&lt;id&gt;/
+  ├── summary.json        (existing)
+  ├── blunders.json       (Wave 3 — present when --model is supplied)
+  ├── placements.png      (existing)
+  ├── tempo.png           (existing)
+  └── report.html         (Wave 4A — always present)</pre>
+
+<h2>Quality gates passing right now</h2>
+
+<table>
+  <thead>
+    <tr><th>Gate</th><th>Status</th><th>Command</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Ruff lint</td><td><span class="pill good">clean</span></td><td><code>uv run ruff check src tests scripts</code></td></tr>
+    <tr><td>Ruff format</td><td><span class="pill good">clean</span></td><td><code>uv run ruff format --check src tests scripts</code></td></tr>
+    <tr><td>mypy</td><td><span class="pill good">clean</span></td><td><code>uv run mypy src</code></td></tr>
+    <tr><td>Pytest</td><td><span class="pill good">131/131</span></td><td><code>uv run pytest -q</code></td></tr>
+    <tr><td>Arena_15 smoke (8)</td><td><span class="pill good">8/8 ok</span></td><td><code>scripts/smoke_arena15.sh --max-replays 8</code></td></tr>
+    <tr><td>Latency baseline (3 clips)</td><td><span class="pill good">captured</span></td><td><code>docs/latency-budget.md</code></td></tr>
+    <tr><td>Wave-2K brev run</td><td><span class="pill warn">awaiting brev login</span></td><td>see "What's left" above</td></tr>
+  </tbody>
+</table>
+
+<h2>Try it</h2>
+
+<pre>uv run crpod analyze arena_15 \
+    00a91415-49c6-4773-a000-f87722361130 \
+    --weights output/models/crpod_v1_best.pt \
+    --model output/models/ev_wave2j_prime.joblib
+
+# Look at the result:
+open output/analysis/00a91415-49c6-4773-a000-f87722361130/report.html</pre>
+
+<hr style="margin-top: 40px; border: none; border-top: 1px solid var(--rule);" />
+<p class="subtitle">
+  Other artifacts in this directory:
+  <a href="00-overview.html">00 — project overview</a>,
+  <a href="01-blunder-detection.html">01 — blunder math</a>,
+  <a href="02-html-report.html">02 — report design</a>.
+</p>
+
+</body>
+</html>

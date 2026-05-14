@@ -85,20 +85,56 @@ uv run pytest
 
 ### Running the pipeline
 
-The HF TV-replay dataset (`chrisrca/clash-royale-tv-replays`) ships raw frame images, not pre-extracted card placements. YOLO detection is required to extract card placements from the frames. You'll need trained YOLO weights (see **Sub-Teams** — the Data & Detection team owns this).
+The HF TV-replay dataset (`chrisrca/clash-royale-tv-replays`) ships raw frame images, not pre-extracted card placements. YOLO detection is required to extract card placements from the frames. You'll need trained YOLO weights (default path: `output/models/crpod_v1_best.pt`, see **Sub-Teams** — the Data & Detection team owns this).
 
 ```bash
 # List available replays (no weights needed)
 uv run crpod list-replays --arena arena_15
 
-# Analyze one replay — requires trained YOLO weights
-uv run crpod analyze arena_15 <replay_id> --weights output/models/yolo.pt
+# Analyze one HF replay (no EV model → no blunders.json)
+uv run crpod analyze arena_15 <replay_id> --weights output/models/crpod_v1_best.pt
 
-# Train an EV model on 50 replays
-uv run crpod train --weights output/models/yolo.pt --out output/models/ev.joblib --max-replays 50
+# Analyze with an EV model → also writes blunders.json + report.html
+uv run crpod analyze arena_15 <replay_id> \
+    --weights output/models/crpod_v1_best.pt \
+    --model output/models/ev.joblib
+
+# Analyze a local match video (your own screen recording)
+uv run crpod analyze-video data/my-match.mp4 \
+    --weights output/models/crpod_v1_best.pt \
+    --model output/models/ev.joblib
+
+# Train a fresh EV model
+uv run crpod train \
+    --weights output/models/crpod_v1_best.pt \
+    --out output/models/ev.joblib \
+    --max-replays 50
 ```
 
-For custom video ingest (raw mp4 → YOLO → ByteTrack → OCR → pipeline), see `src/crpod/pipeline.py::analyze_video`. That path is stubbed until the Data & Detection sub-team trains YOLO weights.
+### What you get out
+
+Each analyze run writes to `output/analysis/<replay_id>/` (or
+`output/analysis/<video_stem>/` for `analyze-video`):
+
+| File | When written | Contents |
+| --- | --- | --- |
+| `summary.json` | always | replay id, arena, n_plays, n_interactions, friendly/enemy leak, n_blunders |
+| `placements.png` | always | 2D heatmap of where you placed troops |
+| `tempo.png` | always | running `(friendly − enemy)` elixir-spent over time |
+| `blunders.json` | only with `--model` | top blunders, ordered worst-first: `{play_idx, card, ev_predicted, per_card_median, sigma_below}` |
+| `report.html` | always | self-contained one-page report — open in Chrome / Safari, no network |
+
+`report.html` bundles the summary fields, top-5 blunders, and both PNGs
+as base64-embedded images. No external dependencies, no JS, no
+build step — just open the file.
+
+### What "blunder" means
+
+A play is a **blunder** when the EV model's predicted outcome for that
+card sits **more than 1σ below the per-card median** from the training
+fold. Per-card medians are persisted inside the EV model artifact, so
+inference doesn't need training data on hand. Cards with fewer than 5
+training samples are excluded from blunder calls (signal too noisy).
 
 ## Project Structure
 
@@ -351,6 +387,10 @@ After pulling the latest changes from main, check what files changed and follow 
 ## Key Docs
 
 - **[pod_summary.md](./pod_summary.md)** — Full project proposal, research question, algorithm design
+- **[docs/ev-validation.md](./docs/ev-validation.md)** — Per-wave EV model holdout metrics (Spearman ρ trajectory)
+- **[docs/latency-budget.md](./docs/latency-budget.md)** — Per-stage CPU latency baseline
+- **[docs/known-issues.md](./docs/known-issues.md)** — Carried limitations and deferred work
+- **[docs/artifacts/](./docs/artifacts/)** — Standalone HTML explainers: project overview, blunder math, final state
 
 ## Tech Stack
 
