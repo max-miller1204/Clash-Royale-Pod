@@ -256,6 +256,13 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
         elixir_timeseries(result.tempo, out / "tempo.png")
     except Exception as e:
         print(f"[warn] viz skipped: {e}", file=sys.stderr)
+
+    try:
+        from crpod.visualization.report import render_report
+
+        render_report(result, out)
+    except Exception as e:
+        print(f"[warn] report skipped: {e}", file=sys.stderr)
     return 0
 
 
@@ -328,6 +335,13 @@ def _cmd_analyze_video(args: argparse.Namespace) -> int:
         elixir_timeseries(result.tempo, out_dir / "tempo.png")
     except Exception as e:
         print(f"[warn] viz skipped: {e}", file=sys.stderr)
+
+    try:
+        from crpod.visualization.report import render_report
+
+        render_report(result, out_dir)
+    except Exception as e:
+        print(f"[warn] report skipped: {e}", file=sys.stderr)
     return 0
 
 
