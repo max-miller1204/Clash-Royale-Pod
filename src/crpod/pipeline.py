@@ -28,6 +28,7 @@ from crpod.dataset.video import VideoFrameIterator
 from crpod.detection.yolo import YoloDetector
 from crpod.features.elixir import elixir_leak, running_tempo
 from crpod.features.interactions import build_interactions
+from crpod.instrumentation import Timer
 from crpod.modeling.ev import EvModel, interaction_features
 from crpod.ocr.hud import HudReader
 from crpod.tracking.bytetrack import Track, Tracker
@@ -129,6 +130,7 @@ def analyze_video(
     yolo_weights: Path,
     model: EvModel | None = None,
     target_fps: float = 10.0,
+    timer: Timer | None = None,
 ) -> AnalysisResult:
     """Run a local match video through the full CV pipeline.
 
@@ -136,57 +138,75 @@ def analyze_video(
     HUD OCR, reduces tracks to `CardPlay` events, and hands a `Replay`
     off to `analyze_replay`. Progress is logged to stderr per
     `research.md` R7.
+
+    If `timer` is supplied, each stage's wall-clock is recorded into the
+    `Timer` for the wave-4B latency audit. Defaults to a throwaway local
+    `Timer` whose output is discarded — the runtime overhead of a no-op
+    `record(stage)` is sub-microsecond so this is cheaper than a flag.
     """
-    iterator = VideoFrameIterator(path=Path(video_path), target_fps=target_fps)
-    frames: list[tuple[int, np.ndarray]] = list(iterator)
+    if timer is None:
+        timer = Timer()
+
+    with timer.record("decode"):
+        iterator = VideoFrameIterator(path=Path(video_path), target_fps=target_fps)
+        frames: list[tuple[int, np.ndarray]] = list(iterator)
     if not frames:
         raise RuntimeError("detection stream empty — check weights match the game version")
 
     total_frames = len(frames)
     frame_height = frames[0][1].shape[0]
 
-    detector = YoloDetector(yolo_weights)
-    detections = detector.infer(frames)
+    with timer.record("yolo"):
+        detector = YoloDetector(yolo_weights)
+        detections = detector.infer(frames)
     if not detections:
         raise RuntimeError("detection stream empty — check weights match the game version")
 
-    tracker = Tracker(frame_rate=int(target_fps))
-    tracks = tracker.update(detections)
-    plays = _tracks_to_plays(tracks, frame_height=frame_height)
+    with timer.record("tracker"):
+        tracker = Tracker(frame_rate=int(target_fps))
+        tracks = tracker.update(detections)
+        plays = _tracks_to_plays(tracks, frame_height=frame_height)
 
     hud_reader = HudReader()
     hud_states: list[HudState] = []
     progress_every = max(1, total_frames // 20)  # ~5%
     last_log_wall = time.monotonic()
     ocr_failures = 0
-    for processed, (idx, frame) in enumerate(frames, start=1):
-        try:
-            hud_state = hud_reader.read(idx, _rescale_for_hud(frame))
-        except Exception:
-            ocr_failures += 1
-            hud_state = HudState(
-                frame=idx,
-                friendly_elixir=0.0,
-                enemy_elixir=None,
-                friendly_king_hp=None,
-                enemy_king_hp=None,
-            )
-        hud_states.append(hud_state)
-        now = time.monotonic()
-        if processed % progress_every == 0 or now - last_log_wall >= 15.0:
-            ocr_pct = int(round(100 * ocr_failures / processed))
-            print(
-                f"[crpod] frame={processed}/{total_frames} plays={len(plays)} ocr_fail={ocr_pct}%",
-                file=sys.stderr,
-                flush=True,
-            )
-            last_log_wall = now
+    with timer.record("hud"):
+        for processed, (idx, frame) in enumerate(frames, start=1):
+            try:
+                hud_state = hud_reader.read(idx, _rescale_for_hud(frame))
+            except Exception:
+                ocr_failures += 1
+                hud_state = HudState(
+                    frame=idx,
+                    friendly_elixir=0.0,
+                    enemy_elixir=None,
+                    friendly_king_hp=None,
+                    enemy_king_hp=None,
+                )
+            hud_states.append(hud_state)
+            now = time.monotonic()
+            if processed % progress_every == 0 or now - last_log_wall >= 15.0:
+                ocr_pct = int(round(100 * ocr_failures / processed))
+                print(
+                    f"[crpod] frame={processed}/{total_frames} plays={len(plays)} "
+                    f"ocr_fail={ocr_pct}%",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                last_log_wall = now
 
-    replay = _assemble_replay(
-        video_path=Path(video_path),
-        plays=plays,
-        hud=hud_states,
-        total_frames=total_frames,
-        target_fps=target_fps,
-    )
-    return analyze_replay(replay, model=model)
+    with timer.record("features"):
+        replay = _assemble_replay(
+            video_path=Path(video_path),
+            plays=plays,
+            hud=hud_states,
+            total_frames=total_frames,
+            target_fps=target_fps,
+        )
+
+    with timer.record("ev"):
+        result = analyze_replay(replay, model=model)
+
+    return result
