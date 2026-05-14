@@ -50,7 +50,7 @@ The offline architecture already supports this — the CV stages run ~30-50ms/fr
 - [ ] **Live side labeling.** The HF-dataset `_infer_side` y-split won't work live — you're viewing your own POV, both sides visible. Key off UI elements instead: your deck sits at the bottom of the frame, opponent's at the top. Detect card thumbnails in the hand strip to disambiguate who played what.
 - [ ] **Rolling EV inference.** Wire the trained `EvModel` into the stream loop — on each completed interaction, run `predict` and emit a live signal (stdout, WebSocket, or overlay). LightGBM single-row inference is ~1ms, well under budget.
 - [ ] **`crpod live` CLI subcommand.** Wraps the stream pipeline: `crpod live --source 0 --model output/models/ev.joblib`. Prints rolling tempo, per-interaction EV, and blunder flags in real time.
-- [ ] **Latency budget audit.** Profile the full pipeline on target hardware. KataCR hit ~120ms/decision + 240ms feature fusion on an RTX 4060 — be skeptical of "<100ms" claims until measured. Record p50/p95/p99 per stage.
+- [x] **Latency budget audit.** Shipped in PR #42: `scripts/latency_audit.py` + `scripts/latency_report.py` produce per-stage p50/p95/p99 and the baseline numbers landed in `docs/latency-budget.md`.
 - [ ] **Overlay renderer (stretch).** OBS browser source or an always-on-top window showing live tempo graph + EV readouts. Only after the core pipeline is solid.
 
 **Caveat:** `pod_summary.md` scopes the project as offline post-game analysis. Real-time is a genuine expansion — viable with this codebase as the foundation, but it pushes the deliverable past the 10-week timeline unless some offline features get dropped. Recommend shipping offline first (weeks 1-6), training YOLO in parallel (weeks 2-5), then building `crpod live` in weeks 7-9.
@@ -62,7 +62,7 @@ The offline architecture already supports this — the CV stages run ~30-50ms/fr
 - [x] **Latency-budget audit.** Wave 4B added `crpod.instrumentation.Timer` + `scripts/latency_audit.py` + `scripts/latency_report.py`. Baseline measurements landed in `docs/latency-budget.md` (CPU floor across 3× 30 s clips, YOLO dominates).
 - [x] **arena_15 smoke harness.** Wave 4C added `scripts/smoke_arena15.sh` that walks all 76 replays end-to-end. 8/8 sample run on CPU passes; full-pool run is brev-friendly. Remaining edge cases tracked in `docs/known-issues.md`.
 - [x] **GitHub Actions CI.** `.github/workflows/ci.yml` runs `ruff check`, `ruff format --check`, `mypy src`, and `pytest` on PRs to `main` via `cachix/install-nix-action` + `nix develop --command`, so CI matches the local flake. All four checks pass locally on this branch.
-- [ ] **Wave 2K — model class A/B + hyperparameter sweep.** Branch `swarm/wave-2k-model-class-ab` is scaffolded with the CV-sweep script. Awaiting a brev run (cost ≈ $10 / 14 h on A6000+). The next signal-quality lift if `+0.223` ρ isn't enough.
+- [ ] **Wave 2K — model class A/B + hyperparameter sweep.** Scaffolded on `origin/swarm/wave-2k-model-class-ab` with the CV-sweep script; tracked by issue #43. Awaiting a brev run (cost ≈ $10 / 14 h on A6000+). The next signal-quality lift if `+0.223` ρ isn't enough.
 
 ## Suggested order
 
