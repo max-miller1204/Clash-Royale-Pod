@@ -390,7 +390,11 @@ After pulling the latest changes from main, check what files changed and follow 
 - **[docs/ev-validation.md](./docs/ev-validation.md)** — Per-wave EV model holdout metrics (Spearman ρ trajectory)
 - **[docs/latency-budget.md](./docs/latency-budget.md)** — Per-stage CPU latency baseline
 - **[docs/known-issues.md](./docs/known-issues.md)** — Carried limitations and deferred work
-- **[docs/artifacts/](./docs/artifacts/)** — Standalone HTML explainers: project overview, blunder math, final state
+- **Standalone HTML explainers** (in [`docs/artifacts/`](./docs/artifacts/)):
+  - **[Project overview](./docs/artifacts/00-overview.html)** — pipeline architecture and research question
+  - **[How blunder detection works](./docs/artifacts/01-blunder-detection.html)** — the per-card median + σ threshold
+  - **[The post-game report — design notes](./docs/artifacts/02-html-report.html)** — what's in `report.html` and why
+  - **[Project final state](./docs/artifacts/03-final-state.html)** — what shipped vs. what was deferred
 
 ## Tech Stack
 
