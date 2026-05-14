@@ -34,8 +34,10 @@ class HudState:
 
     Tower-HP fields are flat (left/right rather than tuples) so the EV target
     builder in `crpod.features.ev_target` can name each tower in its output
-    dict without index ceremony. King HP is read separately because
-    `HudRegions.{friendly,enemy}_king` is still rough — see `docs/TODO.md`.
+    dict without index ceremony. The king-HP fields are reserved for a
+    future digit-OCR pass that reads the `HudRegions.{friendly,enemy}_king`
+    label (which renders only when the king has taken damage); `HudReader`
+    does not populate them today.
     """
 
     frame: int
