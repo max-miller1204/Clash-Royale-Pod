@@ -17,10 +17,11 @@ import re
 import sys
 from pathlib import Path
 
+from crpod.analysis.blunders import detect_blunders
 from crpod.dataset.huggingface import HFReplayLoader
 from crpod.modeling.ev import EvModel, compute_per_card_stats
-from crpod.pipeline import analyze_hf_replay, analyze_replay
-from crpod.types import Interaction
+from crpod.pipeline import AnalysisResult, analyze_hf_replay, analyze_replay
+from crpod.types import Blunder, Interaction
 
 _HOLDOUT_SEED = 0
 _HOLDOUT_FRACTION = 0.2
@@ -147,6 +148,73 @@ def _positive_float(value: str) -> float:
     return f
 
 
+def _populate_blunders(result: AnalysisResult, model: EvModel | None) -> None:
+    """Run the wave-3 blunder detector against a finished `AnalysisResult`.
+
+    The detector signature takes a flat (plays, ev_predictions) pair; we
+    align them by walking the interactions and using each interaction's
+    first friendly card as the anchor (matches `compute_per_card_stats`).
+    Interactions with no friendly plays — model has nothing to attribute
+    to — are skipped.
+
+    Returned `Blunder.play_idx` refers back to the index in `result.interactions`,
+    not the raw `result.replay.plays` list, so callers can resurface the
+    full interaction context (window, enemy plays, predicted EV) from
+    `play_idx`.
+    """
+    if model is None or not model.per_card_stats:
+        return
+    if result.ev_predictions is None:
+        return
+
+    interaction_indices: list[int] = []
+    anchor_plays = []
+    aligned_preds: list[float] = []
+    for idx, (interaction, pred) in enumerate(
+        zip(result.interactions, result.ev_predictions, strict=True)
+    ):
+        if not interaction.friendly_plays:
+            continue
+        anchor_plays.append(interaction.friendly_plays[0])
+        aligned_preds.append(pred)
+        interaction_indices.append(idx)
+
+    raw_blunders = detect_blunders(anchor_plays, aligned_preds, model.per_card_stats)
+    # detect_blunders returns Blunder.play_idx indexing into anchor_plays;
+    # remap back to interaction indices for downstream readability.
+    result.blunders = [
+        Blunder(
+            play_idx=interaction_indices[b.play_idx],
+            card=b.card,
+            ev_predicted=b.ev_predicted,
+            per_card_median=b.per_card_median,
+            sigma_below=b.sigma_below,
+        )
+        for b in raw_blunders
+    ]
+
+
+def _write_blunders_json(result: AnalysisResult, out_dir: Path) -> None:
+    """Persist `result.blunders` as JSON next to `summary.json`.
+
+    Written only when an EV model was supplied (matches the spec contract
+    that the file is absent when `--model` is omitted).
+    """
+    if not result.blunders:
+        return
+    payload = [
+        {
+            "play_idx": b.play_idx,
+            "card": b.card,
+            "ev_predicted": round(b.ev_predicted, 2),
+            "per_card_median": round(b.per_card_median, 2),
+            "sigma_below": round(b.sigma_below, 3),
+        }
+        for b in result.blunders
+    ]
+    (out_dir / "blunders.json").write_text(json.dumps(payload, indent=2))
+
+
 def _cmd_list(args: argparse.Namespace) -> int:
     loader = HFReplayLoader()  # no weights needed for listing
     pool = _filter_min_arena(loader.list_replays(arena=args.arena), args.min_arena)
@@ -164,6 +232,7 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
         sys.exit(1)
     model = EvModel.load(args.model) if args.model else None
     result = analyze_hf_replay(args.arena, args.replay_id, yolo_weights=args.weights, model=model)
+    _populate_blunders(result, model)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -174,8 +243,10 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
         "n_interactions": len(result.interactions),
         "friendly_leak": round(result.friendly_leak, 2),
         "enemy_leak": round(result.enemy_leak, 2),
+        "n_blunders": len(result.blunders),
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
+    _write_blunders_json(result, out)
     print(json.dumps(summary, indent=2))
 
     try:
@@ -234,6 +305,8 @@ def _cmd_analyze_video(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
 
+    _populate_blunders(result, model)
+
     summary = {
         "replay_id": result.replay.replay_id,
         "arena": result.replay.arena,
@@ -242,8 +315,10 @@ def _cmd_analyze_video(args: argparse.Namespace) -> int:
         "n_interactions": len(result.interactions),
         "friendly_leak": round(result.friendly_leak, 2),
         "enemy_leak": round(result.enemy_leak, 2),
+        "n_blunders": len(result.blunders),
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+    _write_blunders_json(result, out_dir)
     print(json.dumps(summary, indent=2))
 
     try:

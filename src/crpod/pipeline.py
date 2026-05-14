@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +31,7 @@ from crpod.features.interactions import build_interactions
 from crpod.modeling.ev import EvModel, interaction_features
 from crpod.ocr.hud import HudReader
 from crpod.tracking.bytetrack import Track, Tracker
-from crpod.types import CardPlay, HudState, Interaction, Replay, Side
+from crpod.types import Blunder, CardPlay, HudState, Interaction, Replay, Side
 
 _HUD_W = 540
 _HUD_H = 960
@@ -95,6 +95,7 @@ class AnalysisResult:
     enemy_leak: float
     tempo: list[tuple[int, int]]
     ev_predictions: list[float] | None = None
+    blunders: list[Blunder] = field(default_factory=list)
 
 
 def analyze_replay(replay: Replay, model: EvModel | None = None) -> AnalysisResult:

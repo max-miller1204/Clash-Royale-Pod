@@ -103,3 +103,21 @@ class Interaction:
     def elixir_trade(self) -> int:
         """Positive = we came out ahead on elixir."""
         return self.enemy_elixir_spent - self.friendly_elixir_spent
+
+
+@dataclass(frozen=True)
+class Blunder:
+    """A play whose predicted EV sits more than 1σ below the per-card median.
+
+    Emitted by `crpod.analysis.blunders.detect_blunders`. `sigma_below` is
+    the unsigned magnitude in standard deviations: 2.3 means "the model
+    predicts an outcome 2.3σ worse than this card's typical outcome from
+    the training fold." Always positive — non-blunder plays are filtered
+    out before construction.
+    """
+
+    play_idx: int
+    card: str
+    ev_predicted: float
+    per_card_median: float
+    sigma_below: float
