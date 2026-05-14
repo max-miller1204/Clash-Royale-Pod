@@ -26,7 +26,7 @@ ahead in the interaction window.
 nix develop -c bash -c '
   uv run crpod train \
     --weights output/models/crpod_v1_best.pt \
-    --out output/models/ev.joblib \
+    --out output/models/ev_wave2j_prime.joblib \
     --max-replays 50
 '
 ```
@@ -34,7 +34,7 @@ nix develop -c bash -c '
 `_cmd_train` prints, in order: drop-rate (HUD-unreadable rows, from
 wave 2A), train sample count, holdout sample count, holdout MAE,
 holdout Spearman, and the saved-model path. The artifact lands at
-`output/models/ev.joblib`; `output/` is gitignored, so the binary
+`output/models/ev_wave2j_prime.joblib`; `output/` is gitignored, so the binary
 never enters version control.
 
 ## Run results
@@ -56,7 +56,7 @@ never enters version control.
 | Driver / CUDA                | shadecloud A6000 / CUDA 12.6 wheels                                  |
 | Python / torch               | CPython 3.11.15 venv / `torch==2.11.0+cu126`                         |
 | HUD reader                   | HP-bar pixel sampling for the four princess-HP fields; tesseract 4.1.1 retained for elixir |
-| Invocation                   | `crpod train --weights output/models/crpod_v1_best.pt --out output/models/ev.joblib --arena arena_15 --max-replays 30` |
+| Invocation                   | `crpod train --weights output/models/crpod_v1_best.pt --out output/models/ev_wave2j_prime.joblib --arena arena_15 --max-replays 30` |
 | Wall-clock                   | ≈ 1 h 38 min (00:30:04Z → 02:08:55Z, 2026-05-02)                     |
 | Replays processed            | 30 (arena_15)                                                        |
 | Frames with HUD-OCR exception| 0 (`ocr_fail=0%` reported throughout)                                |
@@ -78,10 +78,10 @@ training on 234 interactions from 24 replays (holdout 76 interactions from 6 rep
 per_card_stats: 7 cards with ≥5 train samples
 holdout MAE: 463.20
 holdout Spearman: -0.037
-saved model → output/models/ev.joblib
+saved model → output/models/ev_wave2j_prime.joblib
 ```
 
-`output/` is gitignored, so the `ev.joblib` artifact lives only on
+`output/` is gitignored, so the `ev_wave2j_prime.joblib` artifact lives only on
 the brev box (deleted on tear-down) and locally if the operator
 copies it back.
 
@@ -321,7 +321,7 @@ a regression. Concretely:
 | Brev instance   | `hyperstack_H100` ($4-ish/hr; H100 PCIe, 28 vCPU, 100 GB disk)                 |
 | Driver / CUDA   | shadeform H100 / CUDA 12.6 wheels (cu126 reinstall, per wave 2D runbook)       |
 | Python / torch  | CPython 3.11.15 venv / `torch==2.11.0+cu126`                                   |
-| Invocation      | `crpod train --weights output/models/crpod_v1_best.pt --out output/models/ev.joblib --arena arena_15 --max-replays 76` |
+| Invocation      | `crpod train --weights output/models/crpod_v1_best.pt --out output/models/ev_wave2j_prime.joblib --arena arena_15 --max-replays 76` |
 | Wall-clock      | **3 h 15 m 54 s** (05:54:02Z → 09:09:56Z, 2026-05-02)                          |
 | Frames with HUD-OCR exception | 0 across all 76 replays (`ocr_fail=0%` reported throughout)      |
 | GPU utilisation | mean **1.3%**, max 41%, ≥10% in 13/402 samples (3.2%), never ≥50%              |
