@@ -70,8 +70,15 @@ class HudRegions:
     enemy_tower_right: tuple[int, int, int, int] = (360, 240, 480, 275)
     friendly_tower_left: tuple[int, int, int, int] = (60, 678, 180, 712)
     friendly_tower_right: tuple[int, int, int, int] = (360, 678, 480, 712)
-    friendly_king: tuple[int, int, int, int] = (220, 810, 320, 855)
-    enemy_king: tuple[int, int, int, int] = (220, 115, 320, 155)
+    # King-HP labels render only when the king has taken damage, so they
+    # were left as rough guesses in the original tuning pass. Re-measured
+    # against `arena_15/226fefa9-…` frame 1058 (an overtime end-frame where
+    # both kings sit damaged) by `tests/fixtures/hud/sample_king_damaged_540x960.jpg`.
+    # The label spans the level-badge crown on the left through the right
+    # edge of the white HP bar — wide enough to fit a 4-digit reading
+    # like "4525".
+    friendly_king: tuple[int, int, int, int] = (195, 786, 365, 826)
+    enemy_king: tuple[int, int, int, int] = (195, 138, 365, 178)
     # HP-bar pixel-sampling rects: thin horizontal strips covering the
     # bright bar fill segment of each princess badge. Friendly bars sit
     # in the upper part of the badge (y=683-690); enemy bars are mirrored

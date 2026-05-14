@@ -34,7 +34,7 @@ Remaining work to finish the Clash Royale Post-Game Analyzer, grouped by what un
 
 - [x] **Data & Detection — collect YOLO training data.** Superseded by KataCR's public dataset (6,966 frames, 117,294 boxes). No Roboflow annotation needed.
 - [x] **Data & Detection — train YOLOv8.** mAP@0.5 = 0.885 (target was ≥ 0.70). Weights at `output/models/crpod_v1_best.pt`.
-- [x] **Tracking & Feature Engineering — tune HUD OCR regions.** Measured against `arena_15/00a91415-…` frame 251 at 540×960. `HudRegions` now carries empirical rects for enemy/friendly elixir, match timer, and all four princess-tower HP labels (king HPs remain rough guesses — they only render when damaged). `HudReader._read_number` upscales 6× before OCR since the digits are ~20px tall at native res. Fixture `tests/fixtures/hud/sample_540x960.jpg` + `tests/test_hud_ocr.py` assert `pytesseract` reads the enemy elixir digit as `3`.
+- [x] **Tracking & Feature Engineering — tune HUD OCR regions.** Measured against `arena_15/00a91415-…` frame 251 at 540×960. `HudRegions` now carries empirical rects for enemy/friendly elixir, match timer, and all four princess-tower HP labels. King-HP rects (which only render when the king is damaged) were re-measured in issue #55 against `arena_15/226fefa9-…` frame 1058; fixture `tests/fixtures/hud/sample_king_damaged_540x960.jpg` + `tests/test_hud_ocr.py::test_king_rects_capture_hp_label_when_damaged` pin the new defaults. `HudReader._read_number` upscales 6× before OCR since the digits are ~20px tall at native res. Fixture `tests/fixtures/hud/sample_540x960.jpg` + `tests/test_hud_ocr.py` assert `pytesseract` reads the enemy elixir digit as `3`.
 
 ## Integration (blocked on YOLO + OCR)
 

@@ -30,6 +30,13 @@ from crpod.ocr.hud import (
 )
 
 FIXTURE = Path(__file__).parent / "fixtures" / "hud" / "sample_540x960.jpg"
+# Second fixture used by the king-HP rect regression tests: both kings sit
+# damaged so their HP labels actually render. Sampled from arena_15 /
+# 226fefa9-… frame 1058 — five frames before the truly-final row of the
+# replay's parquet (the last few rows are typically post-match overlays).
+KING_DAMAGED_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "hud" / "sample_king_damaged_540x960.jpg"
+)
 
 
 def _load_frame() -> np.ndarray:
@@ -38,6 +45,28 @@ def _load_frame() -> np.ndarray:
     assert frame is not None, f"failed to decode {FIXTURE}"
     assert frame.shape[:2] == (960, 540), f"expected 540x960, got {frame.shape[:2]}"
     return frame
+
+
+def _load_king_damaged_frame() -> np.ndarray:
+    assert KING_DAMAGED_FIXTURE.exists(), f"missing fixture {KING_DAMAGED_FIXTURE}"
+    frame = cv2.imread(str(KING_DAMAGED_FIXTURE))
+    assert frame is not None, f"failed to decode {KING_DAMAGED_FIXTURE}"
+    assert frame.shape[:2] == (960, 540), f"expected 540x960, got {frame.shape[:2]}"
+    return frame
+
+
+def _yellow_badge_pct(crop: np.ndarray) -> float:
+    """Fraction of pixels matching the king HP label's gold-crown badge.
+
+    Bright saturated yellow: R high, G mid-high (≤ R), B low. This catches
+    the level-badge crown and the bar outline that frame the HP digits, both
+    of which only render once the king has taken damage.
+    """
+    b = crop[..., 0].astype(np.int32)
+    g = crop[..., 1].astype(np.int32)
+    r = crop[..., 2].astype(np.int32)
+    mask = (r > 200) & (g > 150) & (g < 230) & (b < 100)
+    return float(mask.mean())
 
 
 def test_hud_reader_reads_fixture_elixir() -> None:
@@ -326,3 +355,50 @@ def test_longest_horizontal_run_does_not_bridge_short_segment() -> None:
 def test_longest_horizontal_run_empty() -> None:
     assert _longest_horizontal_run(np.zeros((0, 0), dtype=bool)) == 0
     assert _longest_horizontal_run(np.zeros((4, 5), dtype=bool)) == 0
+
+
+def test_king_rects_within_frame_bounds() -> None:
+    """Sanity: both king rects fit inside the 540x960 frame."""
+    regions = HudRegions()
+    for name, rect in (
+        ("friendly_king", regions.friendly_king),
+        ("enemy_king", regions.enemy_king),
+    ):
+        x1, y1, x2, y2 = rect
+        assert 0 <= x1 < x2 <= 540, f"{name} x out of bounds: {rect}"
+        assert 0 <= y1 < y2 <= 960, f"{name} y out of bounds: {rect}"
+
+
+def test_king_rects_capture_hp_label_when_damaged() -> None:
+    """The updated `friendly_king` / `enemy_king` rects should land on the
+    in-game HP label whenever the king has taken damage.
+
+    The label is a gold crown badge plus a yellow-trimmed HP bar; both render
+    only when the king is damaged. On the king-damaged fixture, the gold
+    ratio inside each rect should clear an absolute floor AND exceed the
+    same-coordinates ratio on the undamaged fixture (where the rect covers
+    arena/card-hand background). The floor + monotonicity gate is enough to
+    fail if the rect drifts off the label without overfitting to the precise
+    pixel count: a soft-king replay with HP near 0 still has the gold bar
+    outline + badge crown to anchor on, even though the white bar fill is
+    nearly empty.
+    """
+    damaged = _load_king_damaged_frame()
+    undamaged = _load_frame()
+    regions = HudRegions()
+    for name, rect in (
+        ("friendly_king", regions.friendly_king),
+        ("enemy_king", regions.enemy_king),
+    ):
+        x1, y1, x2, y2 = rect
+        dmg_pct = _yellow_badge_pct(damaged[y1:y2, x1:x2])
+        und_pct = _yellow_badge_pct(undamaged[y1:y2, x1:x2])
+        assert dmg_pct >= 0.06, (
+            f"{name} damaged-frame gold ratio {dmg_pct:.1%} below 6% — "
+            f"rect {rect} likely drifted off the HP label"
+        )
+        assert dmg_pct > und_pct, (
+            f"{name} damaged ratio {dmg_pct:.1%} ≤ undamaged {und_pct:.1%} — "
+            f"rect picks up the same amount of gold regardless of damage state, "
+            f"so it isn't anchored on the in-game HP label"
+        )
