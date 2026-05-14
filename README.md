@@ -97,17 +97,17 @@ uv run crpod analyze arena_15 <replay_id> --weights output/models/crpod_v1_best.
 # Analyze with an EV model → also writes blunders.json + report.html
 uv run crpod analyze arena_15 <replay_id> \
     --weights output/models/crpod_v1_best.pt \
-    --model output/models/ev.joblib
+    --model output/models/ev_wave2j_prime.joblib
 
 # Analyze a local match video (your own screen recording)
 uv run crpod analyze-video data/my-match.mp4 \
     --weights output/models/crpod_v1_best.pt \
-    --model output/models/ev.joblib
+    --model output/models/ev_wave2j_prime.joblib
 
 # Train a fresh EV model
 uv run crpod train \
     --weights output/models/crpod_v1_best.pt \
-    --out output/models/ev.joblib \
+    --out output/models/ev_wave2j_prime.joblib \
     --max-replays 50
 ```
 
