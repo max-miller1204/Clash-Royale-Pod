@@ -1083,3 +1083,174 @@ is small. +0.029 is small (just above the 0.02 noise band) — wave
 reasonable runway here; the new features have already moved ρ from
 +0.194 to +0.223 with default LightGBM settings, so a tuned LightGBM
 or a different model class is the next plausible lever.
+
+## Wave 2K — model class A/B + hyperparameter sweep (executed; ρ +0.223 → +0.230)
+
+Wave 2K is a tuning-only wave: same 15-feature set, same data, same
+frozen-holdout split as 2J'. Stage A re-runs `crpod train
+--save-data` to materialise the train/holdout design matrices to a
+joblib; Stage B (`scripts/cv_sweep.py`) runs 5-fold CV across a
+220-config grid (LightGBM 108 / Ridge 4 / XGBoost 108), picks the CV
+winner by mean fold-ρ (tie-break: mean MAE), refits it once on the
+full train fold, touches the frozen holdout exactly once, then runs
+a re-shuffled-split leak check. Δρ vs wave 2J' (+0.223) is the
+clean signal-quality measure — every variance source other than the
+model class + hyperparameters is held fixed.
+
+### Harness
+
+- `scripts/cv_sweep.py` (added this wave) reads the
+  `crpod train --save-data` joblib (`train_rows` / `train_targets` /
+  `train_interactions` / `holdout_rows` / `holdout_targets`), builds
+  the categorical frame via the existing
+  `crpod.modeling.ev._frame_with_categoricals`, and CV-sweeps three
+  model classes with `KFold(n_splits=5, shuffle=True,
+  random_state=0)`.
+- LightGBM grid: `n_estimators ∈ {100,200,400,800}` ×
+  `learning_rate ∈ {0.02,0.05,0.1}` × `num_leaves ∈ {15,31,63}` ×
+  `min_child_samples ∈ {10,20,50}` = 108 configs. XGBoost grid:
+  same `n_estimators`/`learning_rate` × `max_depth ∈ {4,6,8}` ×
+  `min_child_weight ∈ {1,5,10}` = 108. Ridge: `alpha ∈
+  {0.1,1,10,100}` = 4. High-cardinality
+  `top_friendly_x_top_enemy` is one-hot encoded for Ridge with rare
+  levels (< 5 train occurrences) lumped into `__other__`; NaN
+  numerics are zero-filled (Ridge can't ingest NaN).
+- `cv_results.csv` is written incrementally (one row per config,
+  flushed) so a tmux drop mid-sweep loses nothing. Committed as
+  `docs/wave-2k-cv-results.csv` (220 rows).
+- Holdout discipline: the frozen holdout is touched **once**, at the
+  final-fit step after the CV winner is locked. The re-shuffled
+  leak check uses a different seed (20260505) on the pooled
+  train+holdout rows, never the frozen split.
+
+### Brev run
+
+`run-2k.sh` on a fresh `massedcompute_A6000_plus` instance —
+Stage A `crpod train --weights output/models/crpod_v1_best.pt --out
+/tmp/throwaway.joblib --min-arena 23 --max-replays 1500
+--frozen-holdout docs/wave-2.5-holdout.txt --save-data
+wave2k_data.joblib` started `2026-05-14T21:01:15Z`, finished
+`2026-05-15T09:38:45Z` (**12h 37m**); Stage B `cv_sweep.py` ran
+`09:38:45Z → 10:22:16Z` (**43m**). Total wall-clock **13h 21m**.
+The frozen-holdout file is unchanged — same 241 holdout replays as
+waves 2H / 2I / 2J / 2J', same train/holdout boundary, so Δρ is
+apples-to-apples.
+
+Stage A's `crpod train` fits a baseline **default-config** LightGBM
+on its way to saving the data: holdout MAE 318.44, ρ 0.223 — bit-for-bit
+identical to wave 2J' (same data, same default hyperparameters),
+confirming the pipeline is unchanged and the only moving part this
+wave is the sweep.
+
+| Field                     | Wave 2J' (baseline)                | Wave 2K (this chunk)               |
+| ------------------------- | ---------------------------------- | ---------------------------------- |
+| Wall-clock                | 13h 38m                            | **13h 21m** (Stage A 12h37m + Stage B 43m) |
+| Replays processed         | 1,253 of 1,253                     | 1,253 of 1,253 (`--max-replays 1500`, pool exhausted) |
+| Dropped (unreadable HUD)  | 3,142 / 23,662 (13%)               | **3,142 / 23,662 (13%)** — identical (no HUD-reader change) |
+| Train / holdout split     | 16,490 from 1,010 / 4,030 from 241 | **16,490 from 1,010 / 4,030 from 241** — identical (frozen-holdout) |
+| `per_card_stats` cards    | 72                                 | **72** — identical                 |
+| Features                  | 15                                 | 15 — identical (tuning-only wave)  |
+| Model class               | LightGBM (default)                 | **LightGBM** (CV winner — beat XGBoost & Ridge) |
+| Holdout MAE               | 318.44 HP                          | **295.61 HP** (−7.2%)              |
+| **Holdout Spearman ρ**    | **+0.223**                         | **+0.2302**                        |
+| **Δρ vs wave 2J'**        | —                                  | **+0.0072** (below the 0.02 noise band) |
+
+### CV winner
+
+| Field            | Value                                                                       |
+| ---------------- | --------------------------------------------------------------------------- |
+| Model class      | **LightGBM** (beat the best XGBoost and best Ridge on CV mean-ρ)             |
+| Config           | `{'n_estimators': 100, 'learning_rate': 0.02, 'num_leaves': 31, 'min_child_samples': 10}` |
+| CV mean ρ        | **+0.2428 ± 0.0149** (5-fold, shuffled, seed 0)                              |
+| CV mean MAE      | 322.49 HP                                                                   |
+
+Best config per model class (full table in
+`docs/wave-2k-cv-results.csv`):
+
+| Class    | CV mean ρ        | CV mean MAE | Best config                                                                 |
+| -------- | ---------------- | ----------- | --------------------------------------------------------------------------- |
+| **LightGBM** | **+0.2428 ± 0.0149** | 322.49  | `n_estimators=100, learning_rate=0.02, num_leaves=31, min_child_samples=10` |
+| XGBoost  | +0.2391 ± 0.0121 | 323.46      | `n_estimators=100, learning_rate=0.02, max_depth=8, min_child_weight=10`     |
+| Ridge    | +0.2022 ± 0.0241 | 341.27      | `alpha=100.0`                                                               |
+
+The top six configs by CV mean-ρ are **all LightGBM**, all sitting
+in the `n_estimators=100, learning_rate=0.02` (shallow, slow)
+corner, within 0.0023 ρ of each other — a stable plateau, not a
+lucky single point. Best XGBoost trails the winner by only 0.0037
+ρ (within one fold's std); Ridge is clearly behind by ~0.04 ρ.
+Worst overall config was an XGBoost `max_depth=4` point at
++0.1104. Model-class A/B verdict: **gradient-boosted trees win
+over linear; LightGBM edges XGBoost but the gap is inside the
+noise** — the model class is not the lever.
+
+### Leak check
+
+| Field            | Value                                                                |
+| ---------------- | -------------------------------------------------------------------- |
+| Frozen-split ρ   | +0.2302                                                              |
+| Re-shuffled ρ    | +0.2386 (MAE 323.02; seed 20260505, 80/20 on pooled rows)            |
+| Gap              | **0.0084** (threshold 0.05)                                          |
+| Verdict          | **✓ Within leak threshold — no holdout leak.** Frozen-split ρ is *lower* than the re-shuffled ρ, the opposite sign of a leak (a leaked frozen holdout would score *higher* than a fresh shuffle), so the result is conservative if anything. |
+
+### Done-when verdict
+
+| Criterion (from SPEC.md row)                                       | Status                                                                                                                                          |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| CV sweep across ≥ 2 model classes on the train fold                | **Met.** 220 configs across LightGBM / Ridge / XGBoost, 5-fold shuffled CV, full table in `docs/wave-2k-cv-results.csv`.                          |
+| Winner picked by CV (not holdout); holdout touched once            | **Met.** Winner = max CV mean-ρ (tie-break min MAE); frozen holdout scored exactly once at the final-fit step.                                    |
+| Re-shuffled-split leak check run                                   | **Met.** Gap 0.0084 < 0.05 threshold. No leak.                                                                                                   |
+| ρ recorded with Δρ vs 2J' (+0.223)                                 | **Met.** Final holdout ρ +0.2302, Δρ = **+0.0072**.                                                                                              |
+
+Wave-2.5 stop conditions:
+
+- `Δρ < -0.02 → stop and investigate` — got +0.0072, not a
+  regression. No stop on this rule.
+- `0 < Δρ < 0.02 twice consecutively → stop the wave-2.5 push` —
+  wave 2J' was +0.029 (**above** the 0.02 band, so it does *not*
+  count as a sub-noise wave). Wave 2K is +0.0072 (**below** the
+  band). That is the **first** sub-noise wave in the sequence, not
+  the second — the "twice consecutively" rule has **not** fired.
+  But 2K being sub-noise after a tuning sweep across 220 configs is
+  a strong saturation signal in its own right (see Interpretation).
+- `re-shuffled-split ρ diverges from frozen-split ρ by > 0.05 →
+  stop (holdout leaked)` — gap 0.0084, no divergence.
+
+### Cost
+
+Train wall-clock **~$9.08** (`massedcompute_A6000_plus` × 13h 21m
+× $0.68/hr). The prior agent burned **~$10.70** of idle billing
+between instance boot and training kickoff (a missed boot-Monitor
+signal — documented so it isn't repeated). The idle tail between
+Stage B completion (`10:22:16Z`) and instance delete (~`10:24Z`)
+is negligible (< $0.05). **Run total ≈ $19.80**, of which ~$9.10
+is this wave's actual compute and ~$10.70 is the avoidable boot-idle
+overhead from the prior agent.
+
+### Interpretation
+
+**The honest read: tuning is not the lever.** A 220-config sweep
+across three model classes moved holdout ρ from +0.223 to +0.2302
+— Δρ = **+0.0072**, comfortably *below* the 0.02 noise band. The
+CV winner is structurally the same family as the 2J' default
+(LightGBM, shallow trees, slow learning rate); the sweep found a
+slightly better-regularised point but no new signal. MAE improved
+more meaningfully (318.44 → 295.61, −7.2%) because the tuned
+config is better-calibrated in absolute HP, but Spearman rank
+quality — the metric the wave-2.5 push tracks — is essentially
+flat.
+
+This is a **saturation signal**. Wave 2J' added features and got
++0.029; wave 2K tuned exhaustively and got +0.0072. The remaining
+ranking signal is not bottlenecked by model class or
+hyperparameters — it is bottlenecked by the **feature set and label
+quality**. The model-class A/B question is now answered
+definitively: gradient-boosted trees beat linear, LightGBM ≈
+XGBoost (gap inside one fold's std), and there is no untuned
+model-class win waiting to be found. Future wave-2.5 work, if any,
+should target features or labels, not the learner. Per the
+stop-condition bookkeeping this is the *first* sub-noise wave (2J'
+cleared the band at +0.029), so the "twice consecutively" stop has
+not strictly fired — but a flat result after an exhaustive tuning
+sweep is itself strong evidence the current approach is at or near
+its ceiling, and the operator should weigh that before commissioning
+another feature wave.

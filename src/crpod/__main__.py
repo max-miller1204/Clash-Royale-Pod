@@ -418,6 +418,23 @@ def _cmd_train(args: argparse.Namespace) -> int:
         f"training on {len(train_rows)} interactions from {len(train_bundle)} replays "
         f"(holdout {len(holdout_rows)} interactions from {len(holdout_bundle)} replays)"
     )
+    # Wave 2K: optional offline-CV-harness handoff. The data-pipeline pass
+    # above is the ~12 h cost; saving the materialized rows here lets the
+    # CV sweep loop over hyperparameters without re-reading replays.
+    if args.save_data is not None:
+        import joblib
+
+        joblib.dump(
+            {
+                "train_rows": train_rows,
+                "train_targets": train_targets,
+                "train_interactions": train_interactions,
+                "holdout_rows": holdout_rows,
+                "holdout_targets": holdout_targets,
+            },
+            args.save_data,
+        )
+        print(f"saved CV harness data → {args.save_data}")
     model = EvModel()
     model.fit(train_rows, train_targets)
     model.per_card_stats = compute_per_card_stats(train_interactions, train_targets)
@@ -519,6 +536,17 @@ def build_parser() -> argparse.ArgumentParser:
             "path to a committed (arena, replay_id)-per-line holdout file. "
             "If the file exists it dictates the train/holdout split; if not, "
             "the random split is bootstrapped and persisted to this path."
+        ),
+    )
+    tr.add_argument(
+        "--save-data",
+        type=Path,
+        default=None,
+        help=(
+            "Wave 2K: optional joblib path. If set, dump the materialized "
+            "train_rows/targets/interactions and holdout_rows/targets so an "
+            "offline CV harness can sweep hyperparameters without rebuilding "
+            "the feature matrix."
         ),
     )
     tr.set_defaults(func=_cmd_train)
